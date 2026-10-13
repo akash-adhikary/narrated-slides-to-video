@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
-# One-time setup: creates .venv, installs html2mp4 and the headless browser it renders with.
+# One-time setup for Narrated Slides Studio. No admin password or Homebrew needed.
+# Installs everything inside this folder (.venv) plus a few caches in your home folder.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if ! command -v ffmpeg >/dev/null; then
-  echo "ffmpeg is required. macOS: brew install ffmpeg   |   Ubuntu: sudo apt install ffmpeg" >&2; exit 1
-fi
+say() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 
-if command -v uv >/dev/null; then
-  uv venv .venv --python 3.11 -q
-  uv pip install --python .venv/bin/python -q -e .
-else
-  PY=$(command -v python3.12 || command -v python3.11 || command -v python3.10 || true)
-  [ -n "$PY" ] || { echo "Python 3.10–3.12 is required (or install uv: https://docs.astral.sh/uv/)" >&2; exit 1; }
-  "$PY" -m venv .venv
-  .venv/bin/pip install -q --upgrade pip
-  .venv/bin/pip install -q -e .
+say "1/4  Checking for uv (the Python installer)…"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if ! command -v uv >/dev/null; then
+  echo "     Installing uv into your home folder…"
+  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
+  export PATH="$HOME/.local/bin:$PATH"
 fi
-.venv/bin/python -m playwright install chromium
+echo "     ok"
 
+say "2/4  Installing the app (this downloads Python and the libraries it needs)…"
+uv venv .venv --python 3.11 -q --allow-existing
+uv pip install --python .venv/bin/python -q -e .
+echo "     ok"
+
+say "3/4  Installing the browser used to draw the slides…"
+.venv/bin/python -m playwright install chromium >/dev/null
+echo "     ok"
+
+say "4/4  Downloading the narrator voice and preparing music (a few minutes the first time)…"
+.venv/bin/python - <<'PY'
+import warnings; warnings.filterwarnings("ignore")
+from html2mp4 import cli, music
+cli.synthesize([{"chunks": ["Setup complete."]}], "af_heart", 0.9, cli.CACHE / "tts")
+for style in music.STYLES: music.ensure(style, cli.CACHE / "music")
+PY
+echo "     ok"
+
+say "All set! 🎬"
+echo "  To open the Studio:  double-click \"Open Studio.command\" in this folder,"
+echo "  or run:              ./studio.sh"
 echo
-echo "Done. Try it:"
-echo "  source .venv/bin/activate"
-echo "  html2mp4 examples/example.html"

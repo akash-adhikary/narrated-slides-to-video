@@ -1,13 +1,13 @@
-# html2mp4
+# Narrated Slides Studio (html2mp4)
 
 Turn a narrated HTML slide module into a professional, e-learning-ready MP4:
 1080p video, a natural neural voiceover, captions you can switch on or off, and an optional background music bed.
 
 Everything runs locally on your machine: no cloud services, no API keys, no per-video cost.
 
-```bash
-html2mp4 my-module.html          # → my-module.mp4 + my-module.srt + my-module.vtt
-```
+- **Non-technical users:** follow **[GETTING-STARTED.md](GETTING-STARTED.md)**. You'll use the Studio, a web page
+  where you drag in a file, pick a voice and music, and download the video.
+- **Command line:** `html2mp4 my-module.html` → `my-module.mp4` + `.srt` + `.vtt`
 
 ## What you get
 
@@ -21,18 +21,45 @@ html2mp4 my-module.html          # → my-module.mp4 + my-module.srt + my-module
 
 ## Setup (once)
 
-Requirements: macOS or Linux, [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`), and Python 3.10–3.12 (or [uv](https://docs.astral.sh/uv/)).
+Requirements: macOS on Apple silicon (M1 or later). No Homebrew, admin rights or system Python needed: `setup.sh`
+installs [uv](https://docs.astral.sh/uv/), which installs Python, the libraries, a static ffmpeg build and headless Chromium
+into this folder and your user caches.
 
 ```bash
+mkdir -p ~/Downloads/narrated-video && cd ~/Downloads/narrated-video
 git clone https://github.com/akash-adhikary/narrated-slides-to-video.git
 cd narrated-slides-to-video
 ./setup.sh
 ```
 
-The first conversion downloads the voice model (~330 MB) from Hugging Face; after that, everything works offline
-(apart from any web fonts your HTML loads).
+Setup downloads the voice model (~330 MB) once. After that, everything works offline
+(apart from any web fonts your HTML loads). If a system `ffmpeg` is on your PATH it is used; otherwise the bundled one is.
 
-## Usage
+### Platforms
+
+| | |
+|---|---|
+| macOS, Apple silicon | Supported and tested. A 2-minute module renders in about 4 minutes on an M4. |
+| macOS, Intel | Untested. PyTorch no longer ships current builds for Intel Macs, so the voice engine may not install. |
+| Linux | Should work (`./setup.sh`, `./studio.sh`); untested. |
+| Windows | Not packaged yet. The Python code is portable, but there's no Windows installer or launcher yet. |
+
+## Studio (web interface)
+
+```bash
+./studio.sh              # or double-click "Open Studio.command"
+```
+
+This opens `http://127.0.0.1:8765` in your browser, served only to this computer:
+
+- upload a module and read its narration script
+- preview the six voices and three music beds, or upload your own royalty-free track
+- watch live progress, then play the result with captions and download the MP4 / `.srt` / `.vtt`
+- see every video you've made
+
+Videos are saved to `~/Downloads/Narrated Videos` (override with `HTML2MP4_OUTPUT`).
+
+## Command line
 
 ```bash
 source .venv/bin/activate
@@ -91,13 +118,16 @@ Tips:
 4. **Audio.** The voice is cleaned up and normalised, then the music is looped, ducked under speech, mixed, limited and normalised.
 5. **Mux.** ffmpeg combines the picture, sound and captions into a web-optimised (`faststart`) MP4.
 
+The Studio is a small FastAPI app (`src/html2mp4/studio.py` + `studio.html`) bound to 127.0.0.1. It renders one video at a
+time and queues the rest.
+
 The cache lives in `~/.cache/html2mp4` (override with `HTML2MP4_CACHE`) and can be deleted at any time.
 `html2mp4-music <dir>` writes the built-in music beds to a folder if you want to listen to them.
 
 ## Troubleshooting
 
-- **`ffmpeg not found`**: install it (`brew install ffmpeg`).
-- **`No var scenes = [...] narration block found`**: the HTML doesn't follow the template (see *Authoring a module*).
+- **"This file doesn't contain a narration script"**: the HTML doesn't follow the template (see *Authoring a module*).
+- **The Studio page won't load**: the Studio must be running. Start `./studio.sh` and keep its window open.
 - **A word is mispronounced**: respell it the way it should sound in the narration (for example "S Q L" or "sequel"
   instead of "SQL"), or rephrase it.
 - **Fonts look different from the browser**: the page's web fonts must be reachable while rendering.

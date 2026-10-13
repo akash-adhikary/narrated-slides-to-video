@@ -24,7 +24,22 @@ import numpy as np, soundfile as sf
 
 from html2mp4 import music as music_beds
 
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")     # hide the Hugging Face rate-limit notice
 CACHE = pathlib.Path(os.environ.get("HTML2MP4_CACHE", pathlib.Path.home() / ".cache" / "html2mp4"))
+
+
+def _find_ffmpeg():
+    """System ffmpeg if installed, else the static build bundled with imageio-ffmpeg (no Homebrew needed)."""
+    if shutil.which("ffmpeg"): return shutil.which("ffmpeg")
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+FFMPEG = _find_ffmpeg()
+
+
+class ConversionError(Exception):
+    """A problem with the input or settings, with a message meant for the person converting."""
 RENDER_VERSION = 2                      # bump to invalidate cached video renders
 
 WIDTH, HEIGHT, FPS = 1920, 1080, 30
@@ -94,12 +109,23 @@ def run(cmd, **kw): return subprocess.run([str(c) for c in cmd], check=True, **k
 
 def load_scenes(html_text):
     m = re.search(r"var scenes = \[(.*?)\];", html_text, re.S)
-    if not m: sys.exit("No `var scenes = [...]` narration block found — is this a template module?")
+    if not m: raise ConversionError("This file doesn't contain a narration script, so it isn't a narrated slide module. "
+                                    "Check you picked the right file (technical detail: no `var scenes = [...]` list).")
     scenes = []
     for s in re.finditer(r"\{\s*id\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*chunks\s*:\s*\[(.*?)\]\s*\}", m.group(1), re.S):
         chunks = [json.loads('"' + c + '"') for c in re.findall(r'"((?:[^"\\]|\\.)*)"', s.group(2))]
         scenes.append({"id": s.group(1), "chunks": chunks})
+    if not scenes or not any(s["chunks"] for s in scenes):
+        raise ConversionError("The narration script in this file is empty.")
+    missing = [s["id"] for s in scenes if f'id="{s["id"]}"' not in html_text and f"id='{s['id']}'" not in html_text]
+    if missing: raise ConversionError(f"The script mentions slide(s) {', '.join(missing)}, but the page has no element with that id.")
+    if 'id="stage"' not in html_text: raise ConversionError('The page needs a fixed-size <div id="stage"> that holds the slides.')
     return scenes
+
+
+def page_title(html_text, fallback):
+    m = re.search(r"<title>(.*?)</title>", html_text, re.S)
+    return __import__("html").unescape(m.group(1).strip()) if m else fallback
 
 
 # ---------------------------------------------------------------- narration
@@ -120,22 +146,40 @@ def short_espeak_data_path():
     EspeakWrapper.set_data_path(str(short))
 
 
-def synthesize(scenes, voice, speed, cache):
+_PIPELINES = {}
+_TTS_LOCK = __import__("threading").Lock()     # one synthesis at a time (Studio previews vs. renders)
+
+
+def kokoro_pipeline(lang):
+    """Load Kokoro once per language and keep it (loading takes a few seconds)."""
+    if lang not in _PIPELINES:
+        short_espeak_data_path()
+        from kokoro import KPipeline
+        _PIPELINES[lang] = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M")
+    return _PIPELINES[lang]
+
+
+def synthesize(scenes, voice, speed, cache, progress=lambda f: None):
     cache.mkdir(parents=True, exist_ok=True)
     key = lambda text: cache / f"{voice}_{speed}_{hashlib.sha1(text.encode()).hexdigest()[:12]}.wav"
     todo = [c for sc in scenes for c in sc["chunks"] if not key(c).exists()]
     if todo:
         log(f"narrating {len(todo)} sentence(s) with Kokoro voice '{voice}' at {speed}x")
         import warnings; warnings.filterwarnings("ignore")
-        short_espeak_data_path()
-        from kokoro import KPipeline
-        pipe = KPipeline(lang_code=voice[0], repo_id="hexgrad/Kokoro-82M")
-        for text in todo:
-            a = np.concatenate([x.numpy() for _, _, x in pipe(text, voice=voice, speed=speed)])
-            idx = np.where(np.abs(a) > 0.004)[0]                       # trim silence, keep 30 ms
-            pad = int(0.03 * TTS_SR)
-            sf.write(key(text), a[max(0, idx[0] - pad): idx[-1] + pad], TTS_SR)
+        with _TTS_LOCK:
+            _synthesize_todo(todo, voice, speed, key, progress)
     return [[sf.read(key(c), dtype="float32")[0] for c in sc["chunks"]] for sc in scenes]
+
+
+def _synthesize_todo(todo, voice, speed, key, progress):
+    pipe = kokoro_pipeline(voice[0])
+    for i, text in enumerate(todo):
+        progress(i / len(todo))
+        if key(text).exists(): continue                                # made meanwhile by another caller
+        a = np.concatenate([x.numpy() for _, _, x in pipe(text, voice=voice, speed=speed)])
+        idx = np.where(np.abs(a) > 0.004)[0]                           # trim silence, keep 30 ms
+        pad = int(0.03 * TTS_SR)
+        sf.write(key(text), a[max(0, idx[0] - pad): idx[-1] + pad], TTS_SR)
 
 
 # ---------------------------------------------------------------- browser
@@ -188,14 +232,14 @@ X264 = ["-c:v", "libx264", "-preset", "slow", "-crf", "15", "-profile:v", "high"
 
 
 def render_segment(job):
-    html, ids, events, f0, f1, total, out = job
+    html, ids, events, f0, f1, total, out, q = job
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser, page = open_page(p, pathlib.Path(html))
         page.evaluate(PAGE_JS, ids)
         page.evaluate("__html2mp4.reset()")
         cdp = page.context.new_cdp_session(page)
-        ff = subprocess.Popen(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        ff = subprocess.Popen([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
             "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "png", "-i", "-",
             "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int", *X264, out],
             stdin=subprocess.PIPE)
@@ -208,11 +252,12 @@ def render_segment(job):
             page.evaluate(f"__html2mp4.frame({t},{min(1, max(0, (t - (total - FADE_OUT)) / FADE_OUT))})")
             shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True})
             import base64; ff.stdin.write(base64.b64decode(shot["data"]))
+            if q is not None and (f - f0) % 10 == 9: q.put(10)
         ff.stdin.close(); ff.wait(); browser.close()
     return out
 
 
-def render_video(html, ids, events, total, work, workers):
+def render_video(html, ids, events, total, work, workers, progress=lambda f: None):
     nframes = int(round(total * FPS))
     key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, WIDTH]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
@@ -221,15 +266,21 @@ def render_video(html, ids, events, total, work, workers):
     workers = max(1, min(workers, nframes // (FPS * 3)))
     bounds = np.linspace(0, nframes, workers + 1).astype(int)
     segdir = work / "segments"; shutil.rmtree(segdir, ignore_errors=True); segdir.mkdir(parents=True)
-    jobs = [(str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total, str(segdir / f"{i:03}.mp4"))
-            for i in range(workers)]
     log(f"rendering {nframes} frames ({total:.1f}s) at {WIDTH}x{HEIGHT}@{FPS} on {workers} worker(s)")
     t0 = time.time()
-    with ProcessPoolExecutor(workers) as ex:
-        segs = list(ex.map(render_segment, jobs))
+    import multiprocessing, queue
+    with multiprocessing.Manager() as mgr, ProcessPoolExecutor(workers) as ex:
+        q = mgr.Queue()
+        futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
+                                              str(segdir / f"{i:03}.mp4"), q)) for i in range(workers)]
+        done = 0
+        while not all(f.done() for f in futures):
+            try: done += q.get(timeout=0.3); progress(min(1, done / nframes))
+            except queue.Empty: pass
+        segs = [f.result() for f in futures]
     log(f"frames rendered in {time.time() - t0:.0f}s")
     (segdir / "list.txt").write_text("".join(f"file '{s}'\n" for s in segs))
-    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+    run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
          "-i", segdir / "list.txt", "-c", "copy", video])
     keyfile.write_text(key); shutil.rmtree(segdir)
     return video
@@ -240,14 +291,14 @@ def render_video(html, ids, events, total, work, workers):
 def loudnorm(src, dst, pre="", post="", target=-16, extra=()):
     """Two-pass EBU R128 normalisation (linear) with optional filters before/after."""
     lead = f"{pre}," if pre else ""
-    err = run(["ffmpeg", "-hide_banner", "-i", src, "-af",
+    err = run([FFMPEG, "-hide_banner", "-i", src, "-af",
                f"{lead}loudnorm=I={target}:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"],
               capture_output=True, text=True).stderr
     m = json.loads(err[err.rindex("{"): err.rindex("}") + 1])
     ln = (f"loudnorm=I={target}:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
           f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
     tail = f",{post}" if post else ""
-    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-af",
+    run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-af",
          f"{lead}{ln},aresample={SR}:filter_type=kaiser:filter_size=64{tail}", "-ar", SR, *extra, dst])
 
 
@@ -255,7 +306,7 @@ def resolve_music(arg):
     if not arg or arg == "none": return None
     if arg in music_beds.STYLES: return music_beds.ensure(arg, CACHE / "music")
     p = pathlib.Path(arg).expanduser()
-    if not p.exists(): sys.exit(f"music '{arg}' not found — use {', '.join(music_beds.STYLES)}, none, or an audio file path")
+    if not p.exists(): raise ConversionError(f"Music '{arg}' not found — use {', '.join(music_beds.STYLES)}, none, or an audio file.")
     return p
 
 
@@ -271,12 +322,12 @@ def master_audio(clips, total, music, music_level, work):
     final = work / "final.wav"
 
     if music is None:
-        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", work / "voice.wav",
+        run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", work / "voice.wav",
              "-af", fade, "-ac", 2, final]); return final
 
     log(f"mixing music bed '{music.name}' ({music_level} dB under the voice, auto-ducked)")
     n = len(voice)
-    raw = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-i", music,
+    raw = run([FFMPEG, "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-i", music,
                "-t", f"{n / SR:.3f}", "-ac", 2, "-ar", SR, "-f", "f32le", "-"], capture_output=True).stdout
     bed = np.frombuffer(raw, dtype=np.float32).reshape(-1, 2)[:n]
     bed = np.pad(bed, ((0, n - len(bed)), (0, 0)))
@@ -337,49 +388,92 @@ def captions(clips, srt, vtt):
     vtt.write_text("WEBVTT\n\n" + "".join(f"{ts(a, '.')} --> {ts(b, '.')}\n{x}\n\n" for a, b, x in cues))
 
 
+# ---------------------------------------------------------------- convert
+
+VOICES = {   # curated Kokoro voices: id -> (name, description)
+    "af_heart":   ("Heart",   "Warm and friendly · US female"),
+    "af_bella":   ("Bella",   "Bright and upbeat · US female"),
+    "am_michael": ("Michael", "Calm and assured · US male"),
+    "am_fenrir":  ("Fenrir",  "Deep and steady · US male"),
+    "bf_emma":    ("Emma",    "Clear and polished · UK female"),
+    "bm_george":  ("George",  "Measured and classic · UK male"),
+}
+
+# share of the overall progress bar each step takes (rendering frames dominates)
+STEPS = [("voice", "Recording the voiceover", 0.14), ("layout", "Timing the animations", 0.03),
+         ("frames", "Animating the slides", 0.72), ("audio", "Mixing the sound", 0.08), ("finish", "Finishing up", 0.03)]
+
+
+def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", music_level=20.0,
+            scenes_limit=None, workers=None, progress=None):
+    """Convert one module. `progress(fraction, label)` is called as work advances. Returns a summary dict."""
+    html = pathlib.Path(html).resolve()
+    if not html.exists(): raise ConversionError(f"{html} not found")
+    out = pathlib.Path(out or html.with_suffix(".mp4")).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    workers = workers or max(1, (os.cpu_count() or 4) // 2)
+    # cache is per input (not per output) so music/caption variants reuse the rendered picture
+    tag = hashlib.sha1(str(html).encode()).hexdigest()[:8]
+    work = CACHE / "renders" / f"{html.stem}-{tag}{f'-scenes{scenes_limit}' if scenes_limit else ''}"
+    work.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+
+    report = progress or (lambda f, label: None)
+    names = [n for n, _, _ in STEPS]
+    def step(name):
+        k = names.index(name)
+        start, (_, label, weight) = sum(w for _, _, w in STEPS[:k]), STEPS[k]
+        report(start, label)
+        return lambda f: report(start + weight * f, label)
+
+    text = html.read_text(encoding="utf-8")
+    scenes = load_scenes(text)[:scenes_limit]
+    ids = [s["id"] for s in scenes]
+    music_path = resolve_music(music)
+    log(f"{html.name}: {len(scenes)} scene(s), {sum(len(s['chunks']) for s in scenes)} sentences")
+
+    audio = synthesize(scenes, voice, speed, CACHE / "tts", step("voice"))
+    step("layout")
+    events, clips, total = build_timeline(scenes, audio, measure_spans(html, ids))
+    video = render_video(html, ids, events, total, work, workers, step("frames"))
+    step("audio")
+    wav = master_audio(clips, total, music_path, music_level, work)
+    step("finish")
+    srt, vtt = out.with_suffix(".srt"), out.with_suffix(".vtt")
+    captions(clips, srt, vtt)
+    title = page_title(text, html.stem)
+    run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", video, "-i", wav, "-i", srt,
+         "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+         "-c:s", "mov_text", "-metadata:s:a:0", "language=eng", "-metadata:s:s:0", "language=eng",
+         "-metadata", f"title={title}", "-movflags", "+faststart", out])
+    report(1.0, "Done")
+    log(f"done in {time.time() - t0:.0f}s → {out}  ({total:.1f}s, captions: {srt.name}, {vtt.name})")
+    return {"mp4": out, "srt": srt, "vtt": vtt, "title": title, "duration": total, "seconds": time.time() - t0}
+
+
 # ---------------------------------------------------------------- main
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("html", type=pathlib.Path)
     ap.add_argument("-o", "--out", type=pathlib.Path, help="output .mp4 (default: next to the HTML)")
-    ap.add_argument("--voice", default="af_heart", help="Kokoro voice (af_heart, af_bella, am_michael, bf_emma, ...)")
+    ap.add_argument("--voice", default="af_heart", help=f"Kokoro voice ({', '.join(VOICES)}, ...)")
     ap.add_argument("--speed", type=float, default=0.90, help="narration speed (default 0.90)")
     ap.add_argument("--music", default="gentle-pulse", help=f"background music: {', '.join(music_beds.STYLES)} (built-in, default gentle-pulse), path to any audio file, or none")
     ap.add_argument("--music-level", type=float, default=20, help="dB the music sits under the voice while speaking (default 20)")
     ap.add_argument("--scenes", type=int, help="only render the first N scenes (for previews)")
-    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2))
+    ap.add_argument("--workers", type=int, help="parallel render processes (default: half the CPU cores)")
     a = ap.parse_args()
 
-    html = a.html.resolve()
-    if not html.exists(): sys.exit(f"{html} not found")
-    if not shutil.which("ffmpeg"): sys.exit("ffmpeg not found — install it first (macOS: brew install ffmpeg)")
-    out = (a.out or html.with_suffix(".mp4")).resolve()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    # cache is per input (not per output) so music/caption variants reuse the rendered picture
-    tag = hashlib.sha1(str(html).encode()).hexdigest()[:8]
-    work = CACHE / "renders" / f"{html.stem}-{tag}{f'-scenes{a.scenes}' if a.scenes else ''}"
-    work.mkdir(parents=True, exist_ok=True)
-    music = resolve_music(a.music)
-    t0 = time.time()
-
-    scenes = load_scenes(html.read_text())[: a.scenes]
-    ids = [s["id"] for s in scenes]
-    log(f"{html.name}: {len(scenes)} scene(s), {sum(len(s['chunks']) for s in scenes)} sentences")
-    audio = synthesize(scenes, a.voice, a.speed, CACHE / "tts")
-    events, clips, total = build_timeline(scenes, audio, measure_spans(html, ids))
-
-    video = render_video(html, ids, events, total, work, a.workers)
-    wav = master_audio(clips, total, music, a.music_level, work)
-    srt, vtt = out.with_suffix(".srt"), out.with_suffix(".vtt")
-    captions(clips, srt, vtt)
-    title = re.search(r"<title>(.*?)</title>", html.read_text(), re.S)
-    title = title.group(1).replace("&amp;", "&") if title else html.stem
-    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", video, "-i", wav, "-i", srt,
-         "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-         "-c:s", "mov_text", "-metadata:s:a:0", "language=eng", "-metadata:s:s:0", "language=eng",
-         "-metadata", f"title={title}", "-movflags", "+faststart", out])
-    log(f"done in {time.time() - t0:.0f}s → {out}  ({total:.1f}s, captions: {srt.name}, {vtt.name})")
+    shown = {"label": None, "pct": -10}
+    def progress(f, label):
+        pct = int(f * 100)
+        if label != shown["label"] or pct >= shown["pct"] + 10:
+            print(f"[html2mp4] {pct:3d}%  {label}", flush=True); shown.update(label=label, pct=pct)
+    try:
+        convert(a.html, a.out, a.voice, a.speed, a.music, a.music_level, a.scenes, a.workers, progress)
+    except ConversionError as e:
+        sys.exit(f"[html2mp4] error: {e}")
 
 
 if __name__ == "__main__":

@@ -13,3 +13,4 @@ __pycache__/
 *.srt
 *.vtt
 examples/*.mp4
+.claude/
