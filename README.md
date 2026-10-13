@@ -54,7 +54,9 @@ This opens `http://127.0.0.1:8765` in your browser, served only to this computer
 
 - upload a module and read its narration script
 - preview the six voices and three music beds, or upload your own royalty-free track
-- watch live progress, then play the result with captions and download the MP4 / `.srt` / `.vtt`
+- **Preview 10 s** to audition voice, pace and music before committing (a full video in progress pauses briefly so the preview is quick)
+- watch live progress, **cancel** at any time, then play the result with captions and download the MP4 / `.srt` / `.vtt`
+- work keeps running if the page is reloaded or closed; reopening it reconnects to anything in progress
 - see every video you've made
 
 Videos are saved to `~/Downloads/Narrated Videos` (override with `HTML2MP4_OUTPUT`).

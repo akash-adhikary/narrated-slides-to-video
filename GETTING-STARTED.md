@@ -93,6 +93,8 @@ also saved automatically in **Downloads › Narrated Videos**, together with two
 
 - **Wording.** The narrator reads the script exactly as written, so the script must be correct in the HTML file itself.
   If a name or abbreviation sounds wrong, ask the module's author to spell it the way it's said (e.g. "S Q L").
+- **Closed the tab or refreshed?** Nothing is lost. The video keeps being made, and reopening the page shows its progress.
+  Use **Cancel** to stop it.
 - **Changing just the music** of a video you already made is quick (under a minute), because the Studio remembers
   the animation it already drew.
 - **Privacy.** Your files are processed on your Mac only. The internet is used only during setup and to load any
