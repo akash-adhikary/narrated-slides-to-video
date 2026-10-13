@@ -24,8 +24,8 @@ html2mp4 my-module.html          # → my-module.mp4 + my-module.srt + my-module
 Requirements: macOS or Linux, [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`), and Python 3.10–3.12 (or [uv](https://docs.astral.sh/uv/)).
 
 ```bash
-git clone <this repo> html2mp4
-cd html2mp4
+git clone https://github.com/akash-adhikary/narrated-slides-to-video.git
+cd narrated-slides-to-video
 ./setup.sh
 ```
 
