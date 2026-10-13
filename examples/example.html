@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example: Narrated Slides</title>
+<style>
+  /* ---- required structure: #frame > #stage (fixed 16:9 size) > section.slide ---- */
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#0b0d1a;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff}
+  #frame{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #stage{width:1280px;height:720px;flex:none;position:relative;background:#11142b;overflow:hidden}
+
+  .slide{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .6s ease;padding:90px}
+  .slide.active{opacity:1;visibility:visible}
+
+  /* elements with data-c appear when sentence N starts; data-d adds a delay in seconds */
+  [data-c]{opacity:0;transform:translateY(10px);transition:opacity .8s ease var(--d,0s),transform .8s ease var(--d,0s)}
+  [data-c].on{opacity:1;transform:none}
+
+  h1{font-size:64px;line-height:1.1;letter-spacing:-.02em}
+  h2{font-size:44px;color:#7dd3fc;margin-bottom:40px}
+  .sub{font-size:26px;color:#94a3b8;margin-top:24px}
+  .card{display:inline-block;width:330px;margin-right:24px;padding:30px;border:1px solid #334155;border-radius:20px;background:#1e2340}
+  .card b{display:block;font-size:26px;margin-bottom:10px}
+  .card span{font-size:19px;color:#cbd5e1;line-height:1.4}
+</style>
+</head>
+<body>
+<div id="frame"><div id="stage">
+
+  <section class="slide" id="s0">
+    <h1 data-c="0" style="margin-top:180px">Narrated Slides<br>to Video</h1>
+    <div class="sub" data-c="1">An example module for html2mp4</div>
+  </section>
+
+  <section class="slide" id="s1">
+    <h2 data-c="0">Three simple rules</h2>
+    <div class="card" data-c="1"><b>Scenes</b><span>One section with class "slide" per scene.</span></div>
+    <div class="card" data-c="2"><b>Sentences</b><span>The narration lives in a scenes list in the script.</span></div>
+    <div class="card" data-c="3"><b>Cues</b><span>data-c says which sentence reveals an element.</span></div>
+  </section>
+
+</div></div>
+
+<script>
+  // Narration: one entry per slide; each chunk is a sentence. Elements with data-c="N" appear with chunk N.
+  // html2mp4 reads this list, voices every chunk, and syncs the animations to the speech.
+  var scenes = [
+    {id:'s0', chunks:[
+      "Welcome. This short example shows how a narrated slide module becomes a video.",
+      "Everything you see is plain HTML and CSS."]},
+    {id:'s1', chunks:[
+      "There are three simple rules to follow.",
+      "First, each scene is a section with the class slide.",
+      "Second, the narration lives in a list of sentences inside the page script.",
+      "And third, a data c attribute says which sentence reveals each element."]}
+  ];
+
+  // Minimal in-browser preview (not used by html2mp4): click or press space to step through sentences.
+  (function(){
+    var flat = []; scenes.forEach(function(s, si){ s.chunks.forEach(function(_, ci){ flat.push([si, ci]); }); });
+    var pos = 0;
+    function render(){
+      var si = flat[pos][0], ci = flat[pos][1];
+      scenes.forEach(function(s, i){
+        var el = document.getElementById(s.id);
+        el.classList.toggle('active', i === si);
+        el.querySelectorAll('[data-c]').forEach(function(e){
+          var d = e.getAttribute('data-d'); if (d) e.style.setProperty('--d', d + 's');
+          e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci));
+        });
+      });
+    }
+    function next(){ pos = (pos + 1) % flat.length; render(); }
+    document.addEventListener('click', next);
+    document.addEventListener('keydown', function(e){ if (e.code === 'Space') next(); });
+    function fit(){ document.getElementById('stage').style.transform = 'scale(' + Math.min(innerWidth / 1280, innerHeight / 720) + ')'; }
+    addEventListener('resize', fit); fit(); render();
+  })();
+</script>
+</body>
+</html>
