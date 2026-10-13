@@ -26,8 +26,11 @@ MUSIC_INFO = {
 
 app = FastAPI(title="html2mp4 Studio", docs_url=None, redoc_url=None)
 jobs: dict[str, dict] = {}
-job_queue: "queue.PriorityQueue[tuple[int, float, str]]" = queue.PriorityQueue()   # previews jump ahead
+# two lanes so a quick preview never waits behind a full video; each lane does one job at a time
+queues: dict[str, "queue.Queue[str]"] = {"video": queue.Queue(), "preview": queue.Queue()}
+cancels: dict[str, threading.Event] = {}
 PREVIEW_SECONDS = 10
+ACTIVE = ("queued", "running", "cancelling")
 
 
 # ---------------------------------------------------------------- helpers
@@ -41,7 +44,7 @@ def save_jobs():
 def load_jobs():
     if JOBS_FILE.exists():
         for j in json.loads(JOBS_FILE.read_text()).values():
-            if j["status"] in ("queued", "running"):        # interrupted by a restart
+            if j["status"] in ACTIVE:                         # interrupted by a restart
                 j.update(status="failed", error="The studio was closed before this video finished.")
             jobs[j["id"]] = j
 
@@ -62,6 +65,13 @@ def to_m4a(src, dst, seconds=None):
 
 def public(job):
     j = {k: v for k, v in job.items() if k not in ("html_path", "music_arg")}
+    if job.get("kind") != "preview" and job["status"] == "running" and cli.RENDER_PAUSE.is_set() \
+            and job.get("label") == "Animating the slides":
+        j["label"] = "Paused for a moment while your preview is made"
+        j["eta"] = None
+    if job["status"] == "queued":       # say what it's waiting for, so a wait never looks like a hang
+        ahead = [o for o in jobs.values() if o.get("kind") == job.get("kind") and o["status"] in ("running", "cancelling")]
+        j["waiting_for"] = ahead[0]["title"] if ahead else None
     if job["status"] == "running" and job.get("started"):
         elapsed, p = time.time() - job["started"], job.get("progress", 0)
         # the voice step's speed varies a lot, so trust the measured rate only once animating is under way
@@ -71,25 +81,42 @@ def public(job):
 
 # ---------------------------------------------------------------- worker
 
-def worker():
+def worker(lane):
     while True:
-        _, _, jid = job_queue.get()
-        job = jobs[jid]
+        jid = queues[lane].get()
+        job = jobs.get(jid)
+        if not job or job["status"] != "queued": continue          # cancelled (or removed) while waiting
         job.update(status="running", started=time.time(), progress=0.0, label="Getting ready")
+        if lane == "preview": cli.RENDER_PAUSE.set()
         def progress(f, label): job.update(progress=round(f, 4), label=label)
         try:
             preview = job.get("kind") == "preview"
             out = PREVIEWS / f"preview-{jid}.mp4" if preview else unique_path(OUTPUT, job["title"], ".mp4")
             res = cli.convert(job["html_path"], out, job["voice"], job["speed"], job["music_arg"],
                               music_volume=job.get("music_volume", "balanced"), quality=job.get("quality", "1440p"),
-                              preview_seconds=PREVIEW_SECONDS if preview else None, progress=progress)
+                              preview_seconds=PREVIEW_SECONDS if preview else None, progress=progress,
+                              cancel=cancels.setdefault(jid, threading.Event()),
+                              nice=0 if preview else 10, pausable=not preview)   # full videos yield to previews
             job.update(status="done", progress=1.0, label="Done", finished=time.time(),
                        duration=res["duration"], files={k: str(res[k]) for k in ("mp4", "srt", "vtt")})
+        except cli.Cancelled:
+            job.update(status="cancelled", label="Cancelled", finished=time.time())
         except cli.ConversionError as e:
             job.update(status="failed", error=str(e))
         except Exception as e:  # noqa: BLE001 — surface anything unexpected to the user, keep serving
             job.update(status="failed", error=f"Something went wrong while creating the video ({type(e).__name__}: {e}).")
+        cancels.pop(jid, None)
+        if lane == "preview" and queues["preview"].empty(): cli.RENDER_PAUSE.clear()
         save_jobs()
+
+
+def cancel_job(jid):
+    job = jobs.get(jid)
+    if not job or job["status"] not in ACTIVE: return
+    if job["status"] == "queued": job.update(status="cancelled", label="Cancelled")
+    else:
+        job.update(status="cancelling", label="Stopping")
+        cancels.setdefault(jid, threading.Event()).set()
 
 
 def warm_up():
@@ -99,7 +126,7 @@ def warm_up():
         dst = PREVIEWS / f"music-{style}.m4a"
         if not dst.exists(): to_m4a(music_beds.ensure(style, cli.CACHE / "music"), dst, seconds=24)
     for voice in cli.VOICES:
-        if job_queue.qsize() or any(j["status"] == "running" for j in jobs.values()): return   # don't slow a render
+        if any(j["status"] in ACTIVE for j in jobs.values()): return   # don't slow a render
         voice_sample(voice, 0.9)
 
 
@@ -203,12 +230,28 @@ def create_job(req: JobRequest, kind: str = "video"):
                  "music_volume": req.music_volume, "quality": req.quality,
                  "html_path": str(htmls[0]), "status": "queued", "progress": 0.0, "label": "Waiting to start",
                  "created": time.time(), "estimate": work}
-    save_jobs(); job_queue.put((0 if kind == "preview" else 1, time.time(), jid))
+    if kind == "preview":       # a new preview replaces any older one that's still waiting or running
+        for other in list(jobs.values()):
+            if other.get("kind") == "preview" and other["id"] != jid: cancel_job(other["id"])
+    save_jobs(); queues[kind].put(jid)
     return public(jobs[jid])
 
 
 @app.get("/api/jobs")
 def list_jobs(): return sorted((public(j) for j in jobs.values() if j.get("kind") != "preview"), key=lambda j: -j["created"])
+
+
+@app.get("/api/active")
+def active_jobs():
+    """Everything queued or running, previews included, oldest first, so a reloaded page can reconnect."""
+    return sorted((public(j) for j in jobs.values() if j["status"] in ACTIVE), key=lambda j: j["created"])
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel(jid: str):
+    if jid not in jobs: raise HTTPException(404)
+    cancel_job(jid); save_jobs()
+    return public(jobs[jid])
 
 
 @app.get("/api/jobs/{jid}")
@@ -219,7 +262,7 @@ def get_job(jid: str):
 
 @app.delete("/api/jobs/{jid}")
 def forget_job(jid: str):
-    if jid in jobs and jobs[jid]["status"] not in ("queued", "running"):
+    if jid in jobs and jobs[jid]["status"] not in ACTIVE:
         del jobs[jid]; save_jobs()
     return {"ok": True}
 
@@ -257,7 +300,7 @@ def free_port(start=8765):
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     load_jobs()
-    threading.Thread(target=worker, daemon=True).start()
+    for lane in queues: threading.Thread(target=worker, args=(lane,), daemon=True).start()
     threading.Thread(target=warm_up, daemon=True).start()
     port = free_port()
     url = f"http://127.0.0.1:{port}"

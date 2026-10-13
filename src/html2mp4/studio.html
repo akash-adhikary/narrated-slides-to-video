@@ -163,6 +163,9 @@
   .stale{display:none;font-size:12.5px;font-weight:600;color:#a15c00;background:#fff3e0;padding:3px 9px;border-radius:999px}
   @media (prefers-color-scheme: dark){ .stale{color:#ffb74d;background:#3a2a12} }
   .stale.show{display:inline-block}
+  .text-btn{margin-top:14px;font-size:13.5px;font-weight:500;color:var(--muted);text-decoration:underline;text-underline-offset:3px}
+  .text-btn:hover{color:var(--err)}
+  .prog-foot .btn-ghost:hover{color:var(--err);border-color:var(--err)}
 
   /* progress */
   .prog{display:none}
@@ -319,6 +322,11 @@
 
   <!-- 4. create / progress / result -->
   <section class="card locked" id="cardCreate" aria-live="polite">
+      <div class="pv" id="pv">
+        <div class="pv-wait" id="pvWait"><div><b>Preparing your preview</b><span id="pvLabel">Getting ready</span><div class="mini"><i id="pvBar"></i></div><button class="text-btn" id="pvCancel">Cancel preview</button></div></div>
+        <div class="player" id="pvPlayerWrap" hidden><video id="pvPlayer" controls playsinline></video></div>
+        <div class="pv-meta"><span id="pvMeta"></span><span class="stale" id="pvStale">Settings changed, preview again to hear them</span></div>
+      </div>
     <div id="create">
       <div class="row first">
         <div class="row-label">Video quality<small id="qualHint">Sharpest text, still a small web-friendly file</small></div>
@@ -326,11 +334,6 @@
           <button role="radio" data-v="1440p" aria-checked="true">Sharpest · 1440p</button>
           <button role="radio" data-v="1080p" aria-checked="false">Faster · 1080p</button>
         </div>
-      </div>
-      <div class="pv" id="pv">
-        <div class="pv-wait" id="pvWait"><div><b>Preparing your preview</b><span id="pvLabel">Getting ready</span><div class="mini"><i id="pvBar"></i></div></div></div>
-        <div class="player" id="pvPlayerWrap" hidden><video id="pvPlayer" controls playsinline></video></div>
-        <div class="pv-meta"><span id="pvMeta"></span><span class="stale" id="pvStale">Settings changed, preview again to hear them</span></div>
       </div>
       <div class="create">
         <div class="create-sum" id="createSum">Add a module to get started.</div>
@@ -348,7 +351,7 @@
       </div>
       <div class="bar"><i id="barFill"></i></div>
       <div class="steps" id="steps"></div>
-      <div class="prog-foot"><span id="eta">Estimating time…</span><span>You can use other apps meanwhile. Keep this tab open.</span></div>
+      <div class="prog-foot"><span id="eta">Estimating time…</span><span>You can use other apps, or even close this tab. It keeps going.</span><button class="btn-ghost" id="progCancel">Cancel</button></div>
     </div>
 
     <div class="result" id="result">
@@ -502,39 +505,50 @@ function summary(){
 /* ---------- preview ---------- */
 const jobBody = () => ({upload_id: state.upload.upload_id, voice: state.voice, speed: state.speed, music: state.music,
                         music_volume: state.volume, quality: state.quality});
-function describe(){
-  const v = state.options.voices.find(x => x.id === state.voice).name;
-  const pace = {0.85:"relaxed", 0.9:"natural", 1:"brisk"}[state.speed];
-  const m = state.music === "none" ? "no music" : `${(state.options.music.find(x => x.id === state.music)?.name || "your track").toLowerCase()} (${state.volume})`;
-  return `<b>${state.options.preview_seconds}-second preview</b> · ${esc(v)}, ${pace} pace · ${esc(m)}`;
+const waitText = x => x.waiting_for ? `Waiting for “${x.waiting_for}” to finish first` : "Starting…";
+function describe(j){
+  const o = state.options, v = o.voices.find(x => x.id === j.voice)?.name || j.voice;
+  const pace = {0.85:"relaxed", 0.9:"natural", 1:"brisk"}[j.speed] || `${j.speed}×`;
+  const m = j.music === "none" ? "no music" : `${(o.music.find(x => x.id === j.music)?.name || "your track").toLowerCase()} (${j.music_volume})`;
+  return `<b>${o.preview_seconds}-second preview</b> · ${esc(v)}, ${pace} pace · ${esc(m)}`;
+}
+function previewIdle(text){ $("#pvGo").disabled = !state.upload; $("#pvGoText").textContent = text; }
+function pollPreview(j, key){
+  state.preview = {id: j.id, key, status: "running"};
+  $("#pv").classList.add("show"); $("#pvWait").hidden = false; $("#pvPlayerWrap").hidden = true; $("#pvCancel").hidden = false;
+  $("#pvMeta").innerHTML = describe(j); $("#pvStale").classList.remove("show");
+  $("#pvGo").disabled = true; $("#pvGoText").textContent = "Preparing…";
+  clearInterval(state.pvTimer);
+  const tick = async () => {
+    const x = await api(`/api/jobs/${j.id}`).catch(() => null); if(!x || state.preview?.id !== j.id) return;
+    $("#pvLabel").textContent = x.status === "queued" ? waitText(x) : x.status === "cancelling" ? "Stopping…" : `${x.label}… ${Math.round(x.progress * 100)}%`;
+    $("#pvBar").style.width = Math.max(3, Math.round(x.progress * 100)) + "%";
+    if(!["done","failed","cancelled"].includes(x.status)) return;
+    clearInterval(state.pvTimer); state.preview.status = x.status; state.preview.done = x.status === "done";
+    if(x.status === "cancelled"){ $("#pv").classList.remove("show"); previewIdle("Preview 10 s"); return; }
+    previewIdle("Preview again");
+    if(x.status === "failed"){ $("#pv").classList.remove("show"); toast(x.error || "The preview couldn't be made"); return; }
+    const pl = $("#pvPlayer");
+    pl.innerHTML = `<track kind="captions" srclang="en" label="English" src="${fileUrl(x.id, "vtt")}">`;
+    pl.src = fileUrl(x.id, "mp4");
+    $("#pvWait").hidden = true; $("#pvPlayerWrap").hidden = false;
+    pl.play().catch(() => {});
+    summary();
+  };
+  tick(); state.pvTimer = setInterval(tick, 600);
 }
 $("#pvGo").addEventListener("click", async () => {
   stopAudio(); $("#pvPlayer").pause();
-  const key = settingsKey(), meta = describe();
-  $("#pv").classList.add("show"); $("#pvWait").hidden = false; $("#pvPlayerWrap").hidden = true;
-  $("#pvLabel").textContent = "Getting ready"; $("#pvBar").style.width = "3%"; $("#pvMeta").innerHTML = meta; $("#pvStale").classList.remove("show");
-  $("#pvGo").disabled = true; $("#pvGoText").textContent = "Preparing…";
+  $("#pvGo").disabled = true;
   try{
     const j = await api("/api/preview", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(jobBody())});
-    state.preview = {id: j.id, key, status: "running"};
-    clearInterval(state.pvTimer);
-    state.pvTimer = setInterval(async () => {
-      const x = await api(`/api/jobs/${j.id}`).catch(() => null); if(!x) return;
-      $("#pvLabel").textContent = x.status === "queued" ? "Waiting for the video being created to finish" : `${x.label}… ${Math.round(x.progress * 100)}%`;
-      $("#pvBar").style.width = Math.max(3, Math.round(x.progress * 100)) + "%";
-      if(x.status === "done" || x.status === "failed"){
-        clearInterval(state.pvTimer); state.preview.status = x.status; state.preview.done = x.status === "done";
-        $("#pvGo").disabled = false; $("#pvGoText").textContent = "Preview again";
-        if(x.status === "failed"){ $("#pv").classList.remove("show"); toast(x.error || "The preview couldn't be made"); return; }
-        const pl = $("#pvPlayer");
-        pl.innerHTML = `<track kind="captions" srclang="en" label="English" src="${fileUrl(x.id, "vtt")}">`;
-        pl.src = fileUrl(x.id, "mp4");
-        $("#pvWait").hidden = true; $("#pvPlayerWrap").hidden = false;
-        pl.play().catch(() => {});
-        summary();
-      }
-    }, 600);
-  }catch(err){ toast(err.message); $("#pvGo").disabled = false; $("#pvGoText").textContent = "Preview 10 s"; }
+    pollPreview(j, settingsKey());
+  }catch(err){ toast(err.message); previewIdle("Preview 10 s"); }
+});
+$("#pvCancel").addEventListener("click", async () => {
+  if(!state.preview) return;
+  $("#pvCancel").hidden = true; $("#pvLabel").textContent = "Stopping…";
+  await fetch(`/api/jobs/${state.preview.id}/cancel`, {method:"POST"});
 });
 
 /* ---------- create & progress ---------- */
@@ -560,7 +574,7 @@ function track(j){
   track._t = setInterval(async () => {
     try{
       const x = await api(`/api/jobs/${j.id}`); render(x);
-      if(x.status === "done" || x.status === "failed"){ clearInterval(track._t); loadLibrary(); }
+      if(["done","failed","cancelled"].includes(x.status)){ clearInterval(track._t); loadLibrary(); }
     }catch{}
   }, 800);
 }
@@ -569,11 +583,13 @@ function render(j){
   const p = Math.round((j.progress || 0) * 100);
   $("#pct").innerHTML = `${p}<small>%</small>`;
   $("#barFill").style.width = Math.max(2, p) + "%";
-  $("#progLabel").textContent = j.status === "queued" ? "Waiting for the previous video to finish" : (j.label || "Working");
-  const k = STEPS.indexOf(j.label);
+  $("#progLabel").textContent = j.status === "queued" ? waitText(j) : j.status === "cancelling" ? "Stopping…" : (j.label || "Working");
+  $("#progCancel").disabled = j.status === "cancelling";
+  const k = (j.label || "").startsWith("Paused") ? 2 : STEPS.indexOf(j.label);
   document.querySelectorAll(".step").forEach((s, i) => { s.classList.toggle("done", k > i || j.status === "done"); s.classList.toggle("active", i === k && j.status === "running"); });
   $("#eta").textContent = j.eta != null ? (j.eta < 20 ? "Almost there…" : `About ${fmt(j.eta)} left`) : "Estimating time…";
   if(j.status === "done") showResult(j);
+  if(j.status === "cancelled"){ view("create"); summary(); toast("Video cancelled"); }
   if(j.status === "failed"){ view("create"); $("#go").disabled = false; toast("The video couldn't be created"); $("#uploadErr").textContent = j.error; $("#uploadErr").classList.add("show"); $("#cardUpload").scrollIntoView({behavior:"smooth"}); }
 }
 function showResult(j){
@@ -590,19 +606,28 @@ function showResult(j){
   $("#resDownload").href = fileUrl(j.id, "mp4", 1); $("#resSrt").href = fileUrl(j.id, "srt", 1); $("#resVtt").href = fileUrl(j.id, "vtt", 1);
   $("#resReveal").onclick = () => fetch(`/api/jobs/${j.id}/reveal`, {method:"POST"});
 }
+$("#progCancel").addEventListener("click", async () => {
+  if(!state.job || !confirm("Stop creating this video? You can start it again any time.")) return;
+  await fetch(`/api/jobs/${state.job}/cancel`, {method:"POST"});
+});
 $("#resAgain").addEventListener("click", () => { $("#player").pause(); view("create"); summary(); scrollTo({top:0, behavior:"smooth"}); });
 
 /* ---------- library ---------- */
 async function loadLibrary(){
   const list = await api("/api/jobs");
   $("#libCount").textContent = list.filter(j => j.status === "done").length;
+  const sig = list.map(j => j.id + j.status + (j.status === "running" ? Math.round(j.progress * 20) : "")).join();
+  if(sig === loadLibrary.sig) return list;          // unchanged: don't reload the thumbnails
+  loadLibrary.sig = sig;
   if(!list.length){ $("#lib").innerHTML = `<div class="lib-empty">Videos you create will appear here.</div>`; return list; }
   const when = t => new Date(t * 1000).toLocaleString(undefined, {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"});
   $("#lib").innerHTML = `<div class="items">${list.map(j => `
     <article class="item fade-in" data-id="${j.id}">
       <div class="thumb">${j.status === "done"
         ? `<video src="${fileUrl(j.id,"mp4")}#t=4" preload="metadata" muted playsinline></video><span class="dur">${clock(j.duration)}</span>`
-        : `<div class="state ${j.status === "failed" ? "err" : ""}">${j.status === "failed" ? esc(j.error || "Failed") : j.status === "queued" ? "Waiting to start" : `Creating… ${Math.round(j.progress * 100)}%`}</div>`}</div>
+        : `<div class="state ${j.status === "failed" ? "err" : ""}">${j.status === "failed" ? esc(j.error || "Failed")
+            : j.status === "cancelled" ? "Cancelled" : j.status === "queued" ? "Waiting to start"
+            : j.status === "cancelling" ? "Stopping…" : `Creating… ${Math.round(j.progress * 100)}%`}</div>`}</div>
       <div class="item-b">
         <div><div class="item-t">${esc(j.title)}</div><div class="item-m">${when(j.created)}</div></div>
         <div class="item-a">${j.status === "done" ? `
@@ -610,7 +635,8 @@ async function loadLibrary(){
           <a class="link" href="${fileUrl(j.id,"srt",1)}">.srt</a>
           <a class="link" href="${fileUrl(j.id,"vtt",1)}">.vtt</a>
           <button class="link" data-act="reveal">Show</button>` : ""}
-          ${j.status === "done" || j.status === "failed" ? `<button class="link rm" data-act="rm" title="Remove from this list (the file stays on disk)">Remove</button>` : ""}
+          ${["done","failed","cancelled"].includes(j.status) ? `<button class="link rm" data-act="rm" title="Remove from this list (the file stays on disk)">Remove</button>`
+            : j.status !== "cancelling" ? `<button class="link rm" data-act="cancel">Cancel</button>` : ""}
         </div>
       </div>
     </article>`).join("")}</div>`;
@@ -621,6 +647,7 @@ $("#lib").addEventListener("click", async e => {
   const id = item.dataset.id, act = e.target.closest("[data-act]")?.dataset.act;
   if(act === "reveal") return fetch(`/api/jobs/${id}/reveal`, {method:"POST"});
   if(act === "rm"){ await fetch(`/api/jobs/${id}`, {method:"DELETE"}); loadLibrary(); return; }
+  if(act === "cancel"){ if(confirm("Stop creating this video?")){ await fetch(`/api/jobs/${id}/cancel`, {method:"POST"}); loadLibrary(); } return; }
   if(e.target.closest(".thumb") && item.querySelector("video")){
     const j = await api(`/api/jobs/${id}`); $("#cardCreate").classList.remove("locked"); showResult(j);
     $("#cardCreate").scrollIntoView({behavior:"smooth", block:"center"});
@@ -630,9 +657,13 @@ $("#lib").addEventListener("click", async e => {
 /* ---------- start ---------- */
 (async () => {
   await loadOptions();
-  const list = await loadLibrary();
-  const active = list.find(j => j.status === "running" || j.status === "queued");
-  if(active){ $("#cardCreate").classList.remove("locked"); track(active); }
+  await loadLibrary();
+  const active = await api("/api/active");       // jobs keep running on this computer even if the page was closed
+  const video = active.find(j => j.kind !== "preview"), preview = active.filter(j => j.kind === "preview").pop();
+  if(video || preview) $("#cardCreate").classList.remove("locked");
+  if(preview) pollPreview(preview, null);
+  if(video) track(video);
+  setInterval(loadLibrary, 4000);                 // keeps the list current if work was started elsewhere
 })().catch(err => toast(err.message));
 </script>
 </body>

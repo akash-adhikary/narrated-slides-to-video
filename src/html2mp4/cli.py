@@ -39,6 +39,15 @@ def _find_ffmpeg():
 FFMPEG = _find_ffmpeg()
 
 
+# Set by the Studio while a preview is being made: pausable renders (full videos) hold their frame workers
+# so the preview gets the whole machine, then carry on exactly where they stopped.
+RENDER_PAUSE = __import__("threading").Event()
+
+
+class Cancelled(Exception):
+    """The conversion was stopped on request."""
+
+
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
 RENDER_VERSION = 5                      # bump to invalidate cached video renders
@@ -158,6 +167,8 @@ def kokoro_pipeline(lang):
     if lang not in _PIPELINES:
         short_espeak_data_path()
         from kokoro import KPipeline
+        import torch
+        torch.set_num_threads(max(1, min(4, (os.cpu_count() or 4) // 2)))   # many threads thrash when the CPU is busy
         _PIPELINES[lang] = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M")
     return _PIPELINES[lang]
 
@@ -230,15 +241,16 @@ def build_timeline(scenes, audio, spans):
 
 # ---------------------------------------------------------------- video
 
-def x264(crf, fast=False):
+def x264(crf, fast=False, threads=0):
     # High profile 4:2:0 = plays everywhere (browsers, LMSs, phones). Tuned for flat graphics and smooth gradients.
     return ["-c:v", "libx264", "-preset", "veryfast" if fast else "slow", "-tune", "animation", "-crf", str(crf),
             "-profile:v", "high", "-pix_fmt", "yuv420p", "-x264-params", "aq-mode=3",
-            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
+            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-threads", str(threads)]
 
 
 def render_segment(job):
-    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast = job
+    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause = job
+    if nice: os.nice(nice)              # background renders yield the CPU to interactive work (previews)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser, page = open_page(p, pathlib.Path(html), width)
@@ -250,10 +262,12 @@ def render_segment(job):
         ff = subprocess.Popen([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
             "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "png", "-i", "-",
             "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp",
-            *x264(crf, fast), out],
+            *x264(crf, fast, threads), out],
             stdin=subprocess.PIPE)
         ei = 0
         for f in range(f0, f1):
+            if stop is not None and stop.is_set(): break
+            while pause is not None and pause.is_set() and not stop.is_set(): time.sleep(0.2)
             t = f / FPS
             while ei < len(events) and events[ei][0] <= t:
                 et, si, ci = events[ei]
@@ -271,7 +285,8 @@ def render_segment(job):
     return out
 
 
-def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False):
+def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False,
+                 cancel=None, nice=0, pausable=False):
     nframes = int(round(total * FPS))
     key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
@@ -282,16 +297,24 @@ def render_video(html, ids, events, total, work, workers, progress=lambda f: Non
     segdir = work / "segments"; shutil.rmtree(segdir, ignore_errors=True); segdir.mkdir(parents=True)
     log(f"rendering {nframes} frames ({total:.1f}s) at {size[0]}x{size[1]}@{FPS} on {workers} worker(s)")
     t0 = time.time()
+    threads = max(1, (os.cpu_count() or 4) // workers)          # each encoder gets its share; no oversubscription
     import multiprocessing, queue
     with multiprocessing.Manager() as mgr, ProcessPoolExecutor(workers) as ex:
-        q = mgr.Queue()
+        q, stop, pause = mgr.Queue(), mgr.Event(), mgr.Event()
         futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
-                                              str(segdir / f"{i:03}.mp4"), q, size, crf, fast)) for i in range(workers)]
+                                              str(segdir / f"{i:03}.mp4"), q, size, crf, fast, stop, threads, nice,
+                                              pause if pausable else None))
+                   for i in range(workers)]
         done = 0
         while not all(f.done() for f in futures):
+            if cancel is not None and cancel.is_set(): stop.set()
+            if pausable: pause.set() if RENDER_PAUSE.is_set() else pause.clear()
             try: done += q.get(timeout=0.3); progress(min(1, done / nframes))
             except queue.Empty: pass
         segs = [f.result() for f in futures]
+    if cancel is not None and cancel.is_set():
+        shutil.rmtree(segdir, ignore_errors=True)
+        raise Cancelled()
     log(f"frames rendered in {time.time() - t0:.0f}s")
     (segdir / "list.txt").write_text("".join(f"file '{s}'\n" for s in segs))
     run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
@@ -422,11 +445,15 @@ STEPS = [("voice", "Recording the voiceover", 0.14), ("layout", "Timing the anim
 
 
 def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", music_volume="balanced",
-            scenes_limit=None, workers=None, progress=None, quality="1440p", preview_seconds=None):
+            scenes_limit=None, workers=None, progress=None, quality="1440p", preview_seconds=None, cancel=None,
+            nice=0, pausable=False):
     """Convert one module. `progress(fraction, label)` is called as work advances. Returns a summary dict.
 
     music_volume: "subtle" | "balanced" | "present", or dB under the voice while it speaks.
-    preview_seconds: render only the opening N seconds (quicker encode), for trying out settings."""
+    preview_seconds: render only the opening N seconds (quicker encode), for trying out settings.
+    cancel: a threading.Event; when set, the conversion stops at the next sentence or frame and raises Cancelled.
+    nice: run the frame renderers at lower OS priority (e.g. 10) so they don't starve interactive work.
+    pausable: let RENDER_PAUSE hold this render's frame workers (used for full videos while a preview is made)."""
     if quality not in QUALITIES: raise ConversionError(f"Unknown quality '{quality}' — use {', '.join(QUALITIES)}.")
     music_level = MUSIC_VOLUMES[music_volume] if music_volume in MUSIC_VOLUMES else float(music_volume)
     html = pathlib.Path(html).resolve()
@@ -441,7 +468,9 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     work.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
-    report = progress or (lambda f, label: None)
+    def report(f, label):
+        if cancel is not None and cancel.is_set(): raise Cancelled()
+        if progress: progress(f, label)
     names = [n for n, _, _ in STEPS]
     def step(name):
         k = names.index(name)
@@ -469,7 +498,7 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
         audio = synthesize(scenes, voice, speed, CACHE / "tts", voice_progress)
         events, clips, total = build_timeline(scenes, audio, spans)
     step("layout")
-    video = render_video(html, ids, events, total, work, workers, step("frames"),
+    video = render_video(html, ids, events, total, work, workers, step("frames"), cancel=cancel, nice=nice, pausable=pausable,
                          size=QUALITIES[quality], fast=bool(preview_seconds))
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
