@@ -114,6 +114,7 @@ Disk space: about 3 GB for Python, the voice model and Chromium. A 2–3 minute 
 - [CLI reference](docs/cli.md): commands, options and environment variables
 - [How it works](docs/how-it-works.md): pipeline, audio, encoding, Studio, and fidelity to the source
 - [Troubleshooting](docs/troubleshooting.md)
+- [Build prompt](docs/build-prompt.md): the full specification as a single prompt for an AI coding assistant
 - [Changelog](CHANGELOG.md)
 
 ## Contributing
