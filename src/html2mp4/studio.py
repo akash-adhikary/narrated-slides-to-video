@@ -26,14 +26,16 @@ MUSIC_INFO = {
 
 app = FastAPI(title="html2mp4 Studio", docs_url=None, redoc_url=None)
 jobs: dict[str, dict] = {}
-job_queue: "queue.Queue[str]" = queue.Queue()
+job_queue: "queue.PriorityQueue[tuple[int, float, str]]" = queue.PriorityQueue()   # previews jump ahead
+PREVIEW_SECONDS = 10
 
 
 # ---------------------------------------------------------------- helpers
 
 def save_jobs():
     HOME.mkdir(parents=True, exist_ok=True)
-    JOBS_FILE.write_text(json.dumps(jobs, indent=1, default=str))
+    keep = {k: j for k, j in jobs.items() if j.get("kind") != "preview"}      # previews are throwaway
+    JOBS_FILE.write_text(json.dumps(keep, indent=1, default=str))
 
 
 def load_jobs():
@@ -71,13 +73,16 @@ def public(job):
 
 def worker():
     while True:
-        jid = job_queue.get()
+        _, _, jid = job_queue.get()
         job = jobs[jid]
         job.update(status="running", started=time.time(), progress=0.0, label="Getting ready")
         def progress(f, label): job.update(progress=round(f, 4), label=label)
         try:
-            out = unique_path(OUTPUT, job["title"], ".mp4")
-            res = cli.convert(job["html_path"], out, job["voice"], job["speed"], job["music_arg"], progress=progress)
+            preview = job.get("kind") == "preview"
+            out = PREVIEWS / f"preview-{jid}.mp4" if preview else unique_path(OUTPUT, job["title"], ".mp4")
+            res = cli.convert(job["html_path"], out, job["voice"], job["speed"], job["music_arg"],
+                              music_volume=job.get("music_volume", "balanced"), quality=job.get("quality", "1440p"),
+                              preview_seconds=PREVIEW_SECONDS if preview else None, progress=progress)
             job.update(status="done", progress=1.0, label="Done", finished=time.time(),
                        duration=res["duration"], files={k: str(res[k]) for k in ("mp4", "srt", "vtt")})
         except cli.ConversionError as e:
@@ -108,6 +113,7 @@ def index(): return INDEX.read_text()
 def options():
     return {"voices": [{"id": k, "name": n, "desc": d} for k, (n, d) in cli.VOICES.items()],
             "music": [{"id": k, "name": n, "desc": d} for k, (n, d) in MUSIC_INFO.items()],
+            "preview_seconds": PREVIEW_SECONDS,
             "output": str(OUTPUT)}
 
 
@@ -166,14 +172,22 @@ class JobRequest(BaseModel):
     voice: str = "af_heart"
     speed: float = 0.9
     music: str = "gentle-pulse"
+    music_volume: str = "balanced"
+    quality: str = "1440p"
+
+
+@app.post("/api/preview")
+def create_preview(req: JobRequest): return create_job(req, kind="preview")
 
 
 @app.post("/api/jobs")
-def create_job(req: JobRequest):
+def create_job(req: JobRequest, kind: str = "video"):
     folder = UPLOADS / re.sub(r"\W", "", req.upload_id)
     htmls = list(folder.glob("*.htm*"))
     if not htmls: raise HTTPException(404, "That upload has expired — please choose the file again.")
     if req.voice not in cli.VOICES: raise HTTPException(400, "Unknown voice.")
+    if req.music_volume not in cli.MUSIC_VOLUMES or req.quality not in cli.QUALITIES:
+        raise HTTPException(400, "Unknown music volume or quality.")
     if req.music.startswith("upload:"):
         music_arg = str(UPLOADS / "music" / pathlib.Path(req.music[7:]).name)
     elif req.music in music_beds.STYLES or req.music == "none":
@@ -182,16 +196,19 @@ def create_job(req: JobRequest):
     text = htmls[0].read_text(encoding="utf-8", errors="replace")
     words = sum(len(c.split()) for s in cli.load_scenes(text) for c in s["chunks"])
     jid = uuid.uuid4().hex[:10]
-    jobs[jid] = {"id": jid, "title": cli.page_title(text, htmls[0].stem), "filename": htmls[0].name,
+    seconds = words / (2.4 * req.speed)                     # rough video length
+    work = PREVIEW_SECONDS * 2.2 + 15 if kind == "preview" else 40 + seconds * (1.4 if req.quality == "1080p" else 2.2)
+    jobs[jid] = {"id": jid, "kind": kind, "title": cli.page_title(text, htmls[0].stem), "filename": htmls[0].name,
                  "voice": req.voice, "speed": req.speed, "music": req.music, "music_arg": music_arg,
+                 "music_volume": req.music_volume, "quality": req.quality,
                  "html_path": str(htmls[0]), "status": "queued", "progress": 0.0, "label": "Waiting to start",
-                 "created": time.time(), "estimate": 40 + words / (2.4 * req.speed) * 1.4}
-    save_jobs(); job_queue.put(jid)
+                 "created": time.time(), "estimate": work}
+    save_jobs(); job_queue.put((0 if kind == "preview" else 1, time.time(), jid))
     return public(jobs[jid])
 
 
 @app.get("/api/jobs")
-def list_jobs(): return sorted((public(j) for j in jobs.values()), key=lambda j: -j["created"])
+def list_jobs(): return sorted((public(j) for j in jobs.values() if j.get("kind") != "preview"), key=lambda j: -j["created"])
 
 
 @app.get("/api/jobs/{jid}")

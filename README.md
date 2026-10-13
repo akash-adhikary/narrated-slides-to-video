@@ -13,9 +13,9 @@ Everything runs locally on your machine: no cloud services, no API keys, no per-
 
 | | |
 |---|---|
-| **Picture** | 1920×1080, 30 fps, H.264 High, BT.709 colour. Every animation is frame-exact and lands on the word that triggers it. |
+| **Picture** | 2560×1440 (default) or 1920×1080, 30 fps. The slides are drawn natively at that size, never upscaled. H.264 High 4:2:0, BT.709, web-optimised (`faststart`), about 3 MB per minute at 1440p. Every animation is frame-exact and starts with the sentence that triggers it. |
 | **Voice** | [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) neural text-to-speech (open source, Apache-2.0), running locally. Natural pauses between sentences and before slide changes. |
-| **Sound** | Voice clean-up and EBU R128 loudness normalisation to −16 LUFS (the online-learning standard). The music bed automatically ducks under speech. |
+| **Sound** | Voice clean-up and EBU R128 loudness normalisation to −16 LUFS (the online-learning standard). The music bed's bass is cut so it carries on laptop speakers, and it dips under speech. Three volume levels. |
 | **Captions** | An embedded subtitle track (switch on/off in VLC, QuickTime, most LMS players) plus `.srt` and `.vtt` files. Line breaks follow sentences, with no orphan words. |
 | **Music** | Three built-in royalty-free beds, synthesised in code (no AI, no licensing): `gentle-pulse` (default), `calm-pad`, `warm-keys`. Or pass any audio file. |
 
@@ -69,7 +69,9 @@ html2mp4 module.html --music none                 # no music
 html2mp4 module.html --music calm-pad             # another built-in bed
 html2mp4 module.html --music ~/Music/track.mp3    # your own (royalty-free) track
 html2mp4 module.html --voice am_michael           # a different narrator
-html2mp4 module.html --scenes 1 -o preview.mp4    # quick preview of the first scene only
+html2mp4 module.html --music-volume present      # louder music (subtle | balanced | present)
+html2mp4 module.html --preview 10 -o preview.mp4  # just the first 10 seconds, to try settings
+html2mp4 module.html --quality 1080p              # Full HD instead of 1440p (faster, a little smaller)
 ```
 
 | Option | Default | |
@@ -78,11 +80,13 @@ html2mp4 module.html --scenes 1 -o preview.mp4    # quick preview of the first s
 | `--voice` | `af_heart` | Kokoro voice: `af_heart`, `af_bella` (US female), `am_michael`, `am_fenrir` (US male), `bf_emma`, `bm_george` (UK). [Full list](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) |
 | `--speed` | `0.90` | Narration speed. |
 | `--music` | `gentle-pulse` | `gentle-pulse`, `calm-pad`, `warm-keys`, `none`, or a path to an audio file. |
-| `--music-level` | `20` | How many dB the music sits under the voice while it speaks (it rises 6 dB in pauses). |
+| `--music-volume` | `balanced` | `subtle`, `balanced`, `present` (17 / 12 / 8 dB under the voice while it speaks, rising 6 dB in pauses), or a number of dB. |
+| `--quality` | `1440p` | `1440p` (sharpest) or `1080p`. |
+| `--preview S` | | Render only the first S seconds, quickly, to audition voice, pace and music. |
 | `--scenes N` | all | Render only the first N scenes. |
 | `--workers N` | half your CPU cores | Parallel render processes. |
 
-A 2–3 minute module takes about 6–7 minutes on an Apple M-series laptop. The rendered picture and the voice clips
+A 2–3 minute module takes about 5–8 minutes at 1440p on an Apple M-series laptop (less at 1080p). The rendered picture and the voice clips
 are cached, so re-running with a different `--music` takes well under a minute.
 
 ## Authoring a module
@@ -108,6 +112,29 @@ through). A module needs:
 Tips:
 - Write numbers and abbreviations the way they should be spoken; the voice reads the text literally.
 - Check names and jargon in a `--scenes 1` preview before rendering the full module.
+
+## Fidelity: what the video does and doesn't change
+
+The goal is a faithful recording of the HTML. The page's own HTML, CSS, text and animations are used unchanged.
+
+**Identical to the page**
+- Every slide, text, colour, font and graphic. The page is rendered by Chromium from the original file.
+- Every animation: which element appears on which sentence (`data-c`), its delay (`data-d`), its CSS transition curve and duration,
+  and the slide-to-slide transition. The page's own rule is reproduced exactly: elements of sentence N appear when sentence N starts.
+- Checked with a frame-by-frame comparison: the original page, driven by its own player, against the MP4 at all 24 narration steps of
+  a real module. Every step matched to 38–47 dB PSNR. The only differences are compression noise along edges, with no difference in content or timing.
+
+**Necessarily different**
+- **Voice and timing.** In the browser, the page speaks with whatever system voice the viewer has, so its timing varies from
+  computer to computer. The video uses the Kokoro voice, so each step lasts as long as its sentence takes to say, plus a short
+  breath (0.45 s) between sentences and a pause (0.9 s) before each slide change.
+- **Slides are held until their animations finish.** If a slide's last animation (e.g. a delayed `data-d`) would still be running
+  when the narration moves on, the slide is held a moment longer so it's seen complete. The page itself would cut it off if the voice were faster.
+- **Player controls are hidden.** The page's own play bar (`#bar`) and play overlay (`#start`) aren't part of the slides.
+
+**Added (optional)**
+- Background music (`--music none` to turn off) and the caption track (switchable, never burned into the picture).
+- 0.6 s of silence before the first word, and a 1.6 s hold on the final slide while the sound fades out.
 
 ## How it works
 
