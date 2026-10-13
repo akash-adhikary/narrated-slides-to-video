@@ -40,7 +40,7 @@ FFMPEG = _find_ffmpeg()
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 2                      # bump to invalidate cached video renders
+RENDER_VERSION = 3                      # bump to invalidate cached video renders
 
 WIDTH, HEIGHT, FPS = 1920, 1080, 30
 TTS_SR, SR = 24000, 48000
@@ -239,6 +239,8 @@ def render_segment(job):
         page.evaluate(PAGE_JS, ids)
         page.evaluate("__html2mp4.reset()")
         cdp = page.context.new_cdp_session(page)
+        vw, vh = page.viewport_size["width"], page.viewport_size["height"]
+        clip = {"x": 0, "y": 0, "width": vw, "height": vh, "scale": WIDTH / vw}
         ff = subprocess.Popen([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
             "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "png", "-i", "-",
             "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int", *X264, out],
@@ -250,8 +252,13 @@ def render_segment(job):
                 et, si, ci = events[ei]
                 page.evaluate(f"__html2mp4.show({si},{ci},{et})"); ei += 1
             page.evaluate(f"__html2mp4.frame({t},{min(1, max(0, (t - (total - FADE_OUT)) / FADE_OUT))})")
-            shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True})
-            import base64; ff.stdin.write(base64.b64decode(shot["data"]))
+            # CDP ignores the emulated device scale unless the clip carries it explicitly
+            shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True, "clip": clip})
+            import base64; png = base64.b64decode(shot["data"])
+            if f == f0:                                                # PNG IHDR holds width/height
+                size = (int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big"))
+                if size != (WIDTH, HEIGHT): raise RuntimeError(f"captured frames are {size}, expected {(WIDTH, HEIGHT)}")
+            ff.stdin.write(png)
             if q is not None and (f - f0) % 10 == 9: q.put(10)
         ff.stdin.close(); ff.wait(); browser.close()
     return out
