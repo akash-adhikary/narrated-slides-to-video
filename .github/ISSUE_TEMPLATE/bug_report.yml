@@ -1,0 +1,39 @@
+name: Bug report
+description: Something doesn't work, or a video doesn't match its module
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Studio (web app)
+        - Command line
+        - Setup / installation
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS version and chip
+      placeholder: macOS 15.4, Apple M3
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output
+      description: Copy the text from the Terminal window (Studio) or the command's output.
+      render: text
+  - type: textarea
+    id: module
+    attributes:
+      label: Module
+      description: If you can, attach the module or a cut-down copy that shows the problem. For rendering issues, a screenshot of the page next to the same moment in the video helps a lot.

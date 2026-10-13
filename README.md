@@ -1,162 +1,131 @@
-# Narrated Slides Studio (html2mp4)
+# Narrated Slides Studio
 
-Turn a narrated HTML slide module into a professional, e-learning-ready MP4:
-1080p video, a natural neural voiceover, captions you can switch on or off, and an optional background music bed.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](pyproject.toml)
+[![Platform: macOS (Apple silicon)](https://img.shields.io/badge/platform-macOS%20%28Apple%20silicon%29-lightgrey.svg)](#requirements)
 
-Everything runs locally on your machine: no cloud services, no API keys, no per-video cost.
+Narrated Slides Studio turns an HTML slide module into a finished training video: a natural voiceover, background
+music that steps back when the narrator speaks, and captions. Everything runs on your own computer.
 
-- **Non-technical users:** follow **[GETTING-STARTED.md](GETTING-STARTED.md)**. You'll use the Studio, a web page
-  where you drag in a file, pick a voice and music, and download the video.
-- **Command line:** `html2mp4 my-module.html` → `my-module.mp4` + `.srt` + `.vtt`
+It was built for teams that author e-learning modules as animated HTML and need to publish them to a learning
+platform as MP4. Screen-recording a browser is slow and the result drifts out of sync. This tool renders the page frame
+by frame instead, so every animation lands on the sentence that triggers it and the video looks the same as the page.
 
-## What you get
+![Narrated Slides Studio](docs/assets/studio.png)
 
-| | |
-|---|---|
-| **Picture** | 2560×1440 (default) or 1920×1080, 30 fps. The slides are drawn natively at that size, never upscaled. H.264 High 4:2:0, BT.709, web-optimised (`faststart`), about 3 MB per minute at 1440p. Every animation is frame-exact and starts with the sentence that triggers it. |
-| **Voice** | [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) neural text-to-speech (open source, Apache-2.0), running locally. Natural pauses between sentences and before slide changes. |
-| **Sound** | Voice clean-up and EBU R128 loudness normalisation to −16 LUFS (the online-learning standard). The music bed's bass is cut so it carries on laptop speakers, and it dips under speech. Three volume levels. |
-| **Captions** | An embedded subtitle track (switch on/off in VLC, QuickTime, most LMS players) plus `.srt` and `.vtt` files. Line breaks follow sentences, with no orphan words. |
-| **Music** | Three built-in royalty-free beds, synthesised in code (no AI, no licensing): `gentle-pulse` (default), `calm-pad`, `warm-keys`. Or pass any audio file. |
+## Features
 
-## Setup (once)
+- **A web app for non-technical users.** Drop in a module, pick a voice and music, listen to a 10-second preview, then create the video.
+- **Neural voiceover, generated locally** with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M): six curated US and UK voices and three speaking paces.
+- **Faithful to the source.** The page's own HTML, CSS and animations are used unchanged. See [Fidelity](docs/how-it-works.md#fidelity).
+- **Sharp, small files.** 1440p or 1080p H.264, about 3 MB per minute, and they play in any browser or LMS.
+- **Broadcast-style sound.** Loudness is normalised to −16 LUFS, and the music dips automatically under speech.
+- **Captions.** A switchable caption track inside the MP4, plus `.srt` and `.vtt` files for your LMS.
+- **Royalty-free music.** Three built-in music beds are synthesised in code, so there are no licences to track. You can also bring your own track.
+- **Private by design.** No accounts, no uploads, no per-video cost.
 
-Requirements: macOS on Apple silicon (M1 or later). No Homebrew, admin rights or system Python needed: `setup.sh`
-installs [uv](https://docs.astral.sh/uv/), which installs Python, the libraries, a static ffmpeg build and headless Chromium
-into this folder and your user caches.
+## Quick start
+
+Requires macOS on Apple silicon. Setup installs everything else, and needs no admin rights or Homebrew.
 
 ```bash
-mkdir -p ~/Downloads/narrated-video && cd ~/Downloads/narrated-video
+cd ~/Downloads
 git clone https://github.com/akash-adhikary/narrated-slides-to-video.git
 cd narrated-slides-to-video
 ./setup.sh
 ```
 
-Setup downloads the voice model (~330 MB) once. After that, everything works offline
-(apart from any web fonts your HTML loads). If a system `ffmpeg` is on your PATH it is used; otherwise the bundled one is.
-
-### Platforms
-
-| | |
-|---|---|
-| macOS, Apple silicon | Supported and tested. A 2-minute module renders in about 4 minutes on an M4. |
-| macOS, Intel | Untested. PyTorch no longer ships current builds for Intel Macs, so the voice engine may not install. |
-| Linux | Should work (`./setup.sh`, `./studio.sh`); untested. |
-| Windows | Not packaged yet. The Python code is portable, but there's no Windows installer or launcher yet. |
-
-## Studio (web interface)
+Then start the Studio:
 
 ```bash
-./studio.sh              # or double-click "Open Studio.command"
+./studio.sh
 ```
 
-This opens `http://127.0.0.1:8765` in your browser, served only to this computer:
+The Studio opens in your browser. You can also double-click **Open Studio.command** in Finder. Finished videos are
+saved to `~/Downloads/Narrated Videos`.
 
-- upload a module and read its narration script
-- preview the six voices and three music beds, or upload your own royalty-free track
-- **Preview 10 s** to audition voice, pace and music before committing (a full video in progress pauses briefly so the preview is quick)
-- watch live progress, **cancel** at any time, then play the result with captions and download the MP4 / `.srt` / `.vtt`
-- work keeps running if the page is reloaded or closed; reopening it reconnects to anything in progress
-- see every video you've made
-
-Videos are saved to `~/Downloads/Narrated Videos` (override with `HTML2MP4_OUTPUT`).
+New to the command line? The [Getting started guide](docs/getting-started.md) walks through every step, including the
+macOS permission prompt the first time you open the Studio.
 
 ## Command line
+
+Everything the Studio does is also available as a command:
 
 ```bash
 source .venv/bin/activate
 
-html2mp4 module.html                              # default: af_heart voice, 0.90× speed, gentle-pulse music
-html2mp4 module.html --music none                 # no music
-html2mp4 module.html --music calm-pad             # another built-in bed
-html2mp4 module.html --music ~/Music/track.mp3    # your own (royalty-free) track
-html2mp4 module.html --voice am_michael           # a different narrator
-html2mp4 module.html --music-volume present      # louder music (subtle | balanced | present)
-html2mp4 module.html --preview 10 -o preview.mp4  # just the first 10 seconds, to try settings
-html2mp4 module.html --quality 1080p              # Full HD instead of 1440p (faster, a little smaller)
+html2mp4 module.html                                   # module.mp4, module.srt, module.vtt
+html2mp4 module.html --voice bf_emma --speed 1.0       # a different narrator and pace
+html2mp4 module.html --music calm-pad --music-volume present
+html2mp4 module.html --music none --quality 1080p
+html2mp4 module.html --preview 10 -o preview.mp4       # first 10 seconds only
 ```
 
-| Option | Default | |
-|---|---|---|
-| `-o, --out` | next to the HTML | Output `.mp4` path. Captions are written alongside it. |
-| `--voice` | `af_heart` | Kokoro voice: `af_heart`, `af_bella` (US female), `am_michael`, `am_fenrir` (US male), `bf_emma`, `bm_george` (UK). [Full list](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) |
-| `--speed` | `0.90` | Narration speed. |
-| `--music` | `gentle-pulse` | `gentle-pulse`, `calm-pad`, `warm-keys`, `none`, or a path to an audio file. |
-| `--music-volume` | `balanced` | `subtle`, `balanced`, `present` (17 / 12 / 8 dB under the voice while it speaks, rising 6 dB in pauses), or a number of dB. |
-| `--quality` | `1440p` | `1440p` (sharpest) or `1080p`. |
-| `--preview S` | | Render only the first S seconds, quickly, to audition voice, pace and music. |
-| `--scenes N` | all | Render only the first N scenes. |
-| `--workers N` | half your CPU cores | Parallel render processes. |
+See the [CLI reference](docs/cli.md) for every option.
 
-A 2–3 minute module takes about 5–8 minutes at 1440p on an Apple M-series laptop (less at 1080p). The rendered picture and the voice clips
-are cached, so re-running with a different `--music` takes well under a minute.
+## Writing a module
 
-## Authoring a module
+A module is a single HTML file with three conventions: one `<section class="slide">` per scene, the narration as a
+list of sentences in the page script, and a `data-c` attribute on each element that should appear with a given
+sentence.
 
-Open [`examples/example.html`](examples/example.html): it's a complete, minimal module (click it in a browser to step
-through). A module needs:
+```html
+<section class="slide" id="s1">
+  <h2 data-c="0">Three simple rules</h2>
+  <div class="card" data-c="1">Scenes</div>
+  <div class="card" data-c="2" data-d="0.4">Sentences</div>
+</section>
 
-1. **A fixed-size stage.** `#frame > #stage` with a 16:9 size (e.g. 1280×720). The stage is scaled to 1920×1080.
-2. **One `<section class="slide" id="…">` per scene.** The visible one has the class `active`.
-3. **The narration in the page script**, as one list. Each chunk is a sentence, voiced exactly as written:
-   ```js
-   var scenes = [
-     {id:'s0', chunks:["First sentence.", "Second sentence."]},
-     {id:'s1', chunks:["…"]}
-   ];
-   ```
-   Use double quotes around each sentence.
-4. **Cues on animated elements.** `data-c="N"` makes an element appear (class `on`) when sentence N of its scene
-   starts. `data-d="1.5"` adds a 1.5 s delay, exposed to CSS as `var(--d)`. Animate with CSS transitions or animations.
+<script>
+  var scenes = [
+    {id:'s1', chunks:["There are three simple rules.", "First, scenes.", "Second, sentences."]}
+  ];
+</script>
+```
 
-`#bar` and `#start` (an in-page player bar and play overlay, if your template has them) are hidden in the video.
-
-Tips:
-- Write numbers and abbreviations the way they should be spoken; the voice reads the text literally.
-- Check names and jargon in a `--scenes 1` preview before rendering the full module.
-
-## Fidelity: what the video does and doesn't change
-
-The goal is a faithful recording of the HTML. The page's own HTML, CSS, text and animations are used unchanged.
-
-**Identical to the page**
-- Every slide, text, colour, font and graphic. The page is rendered by Chromium from the original file.
-- Every animation: which element appears on which sentence (`data-c`), its delay (`data-d`), its CSS transition curve and duration,
-  and the slide-to-slide transition. The page's own rule is reproduced exactly: elements of sentence N appear when sentence N starts.
-- Checked with a frame-by-frame comparison: the original page, driven by its own player, against the MP4 at all 24 narration steps of
-  a real module. Every step matched to 38–47 dB PSNR. The only differences are compression noise along edges, with no difference in content or timing.
-
-**Necessarily different**
-- **Voice and timing.** In the browser, the page speaks with whatever system voice the viewer has, so its timing varies from
-  computer to computer. The video uses the Kokoro voice, so each step lasts as long as its sentence takes to say, plus a short
-  breath (0.45 s) between sentences and a pause (0.9 s) before each slide change.
-- **Slides are held until their animations finish.** If a slide's last animation (e.g. a delayed `data-d`) would still be running
-  when the narration moves on, the slide is held a moment longer so it's seen complete. The page itself would cut it off if the voice were faster.
-- **Player controls are hidden.** The page's own play bar (`#bar`) and play overlay (`#start`) aren't part of the slides.
-
-**Added (optional)**
-- Background music (`--music none` to turn off) and the caption track (switchable, never burned into the picture).
-- 0.6 s of silence before the first word, and a 1.6 s hold on the final slide while the sound fades out.
+[`examples/example.html`](examples/example.html) is a complete module. The [authoring guide](docs/authoring.md) covers
+the format in full.
 
 ## How it works
 
-1. **Narration.** Each sentence is voiced with Kokoro and cached by its text, voice and speed.
-2. **Timeline.** Sentences are laid out with breathing room. Each slide is held until all of its animations have finished.
-3. **Picture.** Headless Chromium (via Playwright) loads the page. Every CSS transition is paused and seeked to the exact
-   time of each frame, and frames are rendered in parallel segments.
-4. **Audio.** The voice is cleaned up and normalised, then the music is looped, ducked under speech, mixed, limited and normalised.
-5. **Mux.** ffmpeg combines the picture, sound and captions into a web-optimised (`faststart`) MP4.
+The narration is voiced sentence by sentence and laid out on a timeline. Headless Chromium then loads the module, pauses
+every CSS transition, and seeks it to the exact time of each frame. Frames are rendered in parallel at the target
+resolution and encoded with x264. The voice and music are mixed, ducked and loudness-normalised, and FFmpeg combines
+the picture, sound and captions into a web-optimised MP4.
 
-The Studio is a small FastAPI app (`src/html2mp4/studio.py` + `studio.html`) bound to 127.0.0.1. It renders one video at a
-time and queues the rest.
+The [architecture notes](docs/how-it-works.md) describe each stage and what the video does and doesn't change from the page.
 
-The cache lives in `~/.cache/html2mp4` (override with `HTML2MP4_CACHE`) and can be deleted at any time.
-`html2mp4-music <dir>` writes the built-in music beds to a folder if you want to listen to them.
+## Requirements
 
-## Troubleshooting
+| Platform | Status |
+|---|---|
+| macOS on Apple silicon (M1 or later) | Supported |
+| macOS on Intel | Untested. PyTorch stopped publishing Intel Mac builds after 2.2, so setup is likely to fail. |
+| Linux | Expected to work with `./setup.sh`, but untested |
+| Windows | Not packaged yet |
 
-- **"This file doesn't contain a narration script"**: the HTML doesn't follow the template (see *Authoring a module*).
-- **The Studio page won't load**: the Studio must be running. Start `./studio.sh` and keep its window open.
-- **A word is mispronounced**: respell it the way it should sound in the narration (for example "S Q L" or "sequel"
-  instead of "SQL"), or rephrase it.
-- **Fonts look different from the browser**: the page's web fonts must be reachable while rendering.
+Disk space: about 3 GB for Python, the voice model and Chromium. A 2–3 minute module takes 5–8 minutes to create at
+1440p on an M-series laptop.
+
+## Documentation
+
+- [Getting started](docs/getting-started.md): installation and first video, for non-technical users
+- [Authoring modules](docs/authoring.md): the module format and narration tips
+- [CLI reference](docs/cli.md): commands, options and environment variables
+- [How it works](docs/how-it-works.md): pipeline, audio, encoding, Studio, and fidelity to the source
+- [Troubleshooting](docs/troubleshooting.md)
+- [Changelog](CHANGELOG.md)
+
+## Contributing
+
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and how
+changes are verified. To report a security issue, follow [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © Akash Adhikary.
+
+Narrated Slides Studio builds on [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0),
+[Playwright](https://playwright.dev) (Apache-2.0), [FFmpeg](https://ffmpeg.org) and [x264](https://www.videolan.org/developers/x264.html)
+(bundled through [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg)), and [FastAPI](https://fastapi.tiangolo.com).
+Each is distributed under its own licence.

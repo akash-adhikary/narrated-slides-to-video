@@ -33,7 +33,7 @@ for style in music.STYLES: music.ensure(style, cli.CACHE / "music")
 PY
 echo "     ok"
 
-say "All set! 🎬"
+say "All set."
 echo "  To open the Studio:  double-click \"Open Studio.command\" in this folder,"
 echo "  or run:              ./studio.sh"
 echo

@@ -1,16 +1,20 @@
+# Python
 .venv/
 __pycache__/
 *.egg-info/
-.DS_Store
 
-# local working files (not part of the tool)
+# OS / editor
+.DS_Store
+.claude/
+
+# Generated output
+*.mp4
+*.srt
+*.vtt
+
+# Local working files kept next to the checkout (modules under test, scratch renders)
+/*.html
 /build/
 /output/
 /music/
 /voice-samples/
-/*.html
-/*.mp4
-*.srt
-*.vtt
-examples/*.mp4
-.claude/
