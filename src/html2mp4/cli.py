@@ -16,7 +16,8 @@ Pipeline (fully local, no cloud services):
 usage:
   html2mp4 module.html                          # -> module.mp4 (+ .srt/.vtt) next to the HTML
   html2mp4 module.html --music none             # no background music
-  html2mp4 module.html --scenes 1 -o preview.mp4
+  html2mp4 module.html --preview 10 -o preview.mp4   # first 10 seconds only
+  html2mp4 module.html --quality 1440p --music-volume present
 """
 import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys, textwrap, time
 from concurrent.futures import ProcessPoolExecutor
@@ -40,19 +41,24 @@ FFMPEG = _find_ffmpeg()
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 3                      # bump to invalidate cached video renders
+RENDER_VERSION = 5                      # bump to invalidate cached video renders
 
-WIDTH, HEIGHT, FPS = 1920, 1080, 30
+FPS = 30
+# Output size; the stage is rendered natively at that scale (vector-sharp, never upscaled). 1440p keeps colour detail at
+# the stage's own resolution despite web video's half-resolution colour (4:2:0), so small coloured text stays crisp.
+QUALITIES = {"1440p": (2560, 1440), "1080p": (1920, 1080)}
+CRF = 17                         # measured within ~0.5 dB of lossless 4:2:0 on slide content, at ~2-3 MB per minute
+MUSIC_VOLUMES = {"subtle": 17.0, "balanced": 12.0, "present": 8.0}   # dB the music sits under the voice while speaking
 TTS_SR, SR = 24000, 48000
 
 # pacing (seconds)
 PRE_ROLL     = 0.6                      # silence before the first word
-VISUAL_LEAD  = 0.15                     # visuals start just before the matching words
+VISUAL_LEAD  = 0.0                      # like the page's own player: visuals start exactly with their sentence
 CHUNK_GAP    = 0.45                     # breath between sentences
 SCENE_GAP    = 0.9                      # extra pause before a slide change
 SETTLE_HOLD  = 0.6                      # fully built slide stays up this long before cutting
 END_HOLD     = 1.6                      # hold on the last frame
-FADE_OUT     = 0.8                      # picture + sound fade at the very end
+FADE_OUT     = 0.8                      # sound fades at the very end (the picture holds the last slide, as the page does)
 
 PAGE_CSS = "#bar,#start{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
 
@@ -62,9 +68,6 @@ PAGE_JS = """
   const items = scenes.map(s => [...s.querySelectorAll('[data-c]')]);
   items.flat().forEach(e => { const d = e.getAttribute('data-d'); if (d) e.style.setProperty('--d', d + 's'); });
   const stage = document.getElementById('stage');
-  const fade = document.createElement('div');
-  fade.style.cssText = 'position:absolute;inset:0;background:#000;opacity:0;z-index:999;pointer-events:none';
-  stage.appendChild(fade);
   const started = new Map();
   const secs = v => v.split(',').map(x => parseFloat(x) * (x.trim().endsWith('ms') ? 0.001 : 1));
   const span = e => {                     // longest delay+duration of the element's transitions/animations
@@ -93,7 +96,7 @@ PAGE_JS = """
       items.forEach((list, i) => list.forEach(e => e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci))));
       seek(t);
     },
-    frame: (t, fade_o) => { seek(t); fade.style.opacity = fade_o; },
+    frame: t => seek(t),
   };
 }
 """
@@ -184,13 +187,13 @@ def _synthesize_todo(todo, voice, speed, key, progress):
 
 # ---------------------------------------------------------------- browser
 
-def open_page(p, html):
+def open_page(p, html, width=1920):
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     page.goto(html.as_uri(), wait_until="networkidle")
     w, h = page.evaluate("[document.getElementById('stage').offsetWidth, document.getElementById('stage').offsetHeight]")
     page.close()
-    page = browser.new_page(viewport={"width": w, "height": h}, device_scale_factor=WIDTH / w)
+    page = browser.new_page(viewport={"width": w, "height": h}, device_scale_factor=width / w)
     page.goto(html.as_uri(), wait_until="networkidle")
     page.evaluate("document.fonts.ready")
     page.add_style_tag(content=PAGE_CSS)
@@ -227,23 +230,27 @@ def build_timeline(scenes, audio, spans):
 
 # ---------------------------------------------------------------- video
 
-X264 = ["-c:v", "libx264", "-preset", "slow", "-crf", "15", "-profile:v", "high", "-pix_fmt", "yuv420p",
-        "-x264-params", "aq-mode=3", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
+def x264(crf, fast=False):
+    # High profile 4:2:0 = plays everywhere (browsers, LMSs, phones). Tuned for flat graphics and smooth gradients.
+    return ["-c:v", "libx264", "-preset", "veryfast" if fast else "slow", "-tune", "animation", "-crf", str(crf),
+            "-profile:v", "high", "-pix_fmt", "yuv420p", "-x264-params", "aq-mode=3",
+            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
 
 
 def render_segment(job):
-    html, ids, events, f0, f1, total, out, q = job
+    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast = job
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser, page = open_page(p, pathlib.Path(html))
+        browser, page = open_page(p, pathlib.Path(html), width)
         page.evaluate(PAGE_JS, ids)
         page.evaluate("__html2mp4.reset()")
         cdp = page.context.new_cdp_session(page)
         vw, vh = page.viewport_size["width"], page.viewport_size["height"]
-        clip = {"x": 0, "y": 0, "width": vw, "height": vh, "scale": WIDTH / vw}
+        clip = {"x": 0, "y": 0, "width": vw, "height": vh, "scale": width / vw}
         ff = subprocess.Popen([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
             "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "png", "-i", "-",
-            "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int", *X264, out],
+            "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp",
+            *x264(crf, fast), out],
             stdin=subprocess.PIPE)
         ei = 0
         for f in range(f0, f1):
@@ -251,35 +258,35 @@ def render_segment(job):
             while ei < len(events) and events[ei][0] <= t:
                 et, si, ci = events[ei]
                 page.evaluate(f"__html2mp4.show({si},{ci},{et})"); ei += 1
-            page.evaluate(f"__html2mp4.frame({t},{min(1, max(0, (t - (total - FADE_OUT)) / FADE_OUT))})")
+            page.evaluate(f"__html2mp4.frame({t})")
             # CDP ignores the emulated device scale unless the clip carries it explicitly
             shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True, "clip": clip})
             import base64; png = base64.b64decode(shot["data"])
             if f == f0:                                                # PNG IHDR holds width/height
                 size = (int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big"))
-                if size != (WIDTH, HEIGHT): raise RuntimeError(f"captured frames are {size}, expected {(WIDTH, HEIGHT)}")
+                if size != (width, height): raise RuntimeError(f"captured frames are {size}, expected {(width, height)}")
             ff.stdin.write(png)
             if q is not None and (f - f0) % 10 == 9: q.put(10)
         ff.stdin.close(); ff.wait(); browser.close()
     return out
 
 
-def render_video(html, ids, events, total, work, workers, progress=lambda f: None):
+def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False):
     nframes = int(round(total * FPS))
-    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, WIDTH]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
     if video.exists() and keyfile.exists() and keyfile.read_text() == key:
         log("video unchanged — reusing cached render"); return video
     workers = max(1, min(workers, nframes // (FPS * 3)))
     bounds = np.linspace(0, nframes, workers + 1).astype(int)
     segdir = work / "segments"; shutil.rmtree(segdir, ignore_errors=True); segdir.mkdir(parents=True)
-    log(f"rendering {nframes} frames ({total:.1f}s) at {WIDTH}x{HEIGHT}@{FPS} on {workers} worker(s)")
+    log(f"rendering {nframes} frames ({total:.1f}s) at {size[0]}x{size[1]}@{FPS} on {workers} worker(s)")
     t0 = time.time()
     import multiprocessing, queue
     with multiprocessing.Manager() as mgr, ProcessPoolExecutor(workers) as ex:
         q = mgr.Queue()
         futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
-                                              str(segdir / f"{i:03}.mp4"), q)) for i in range(workers)]
+                                              str(segdir / f"{i:03}.mp4"), q, size, crf, fast)) for i in range(workers)]
         done = 0
         while not all(f.done() for f in futures):
             try: done += q.get(timeout=0.3); progress(min(1, done / nframes))
@@ -320,7 +327,7 @@ def resolve_music(arg):
 def master_audio(clips, total, music, music_level, work):
     mix = np.zeros(int((total + 1) * TTS_SR), dtype=np.float32)
     for t, a, _ in clips:
-        i = int(round(t * TTS_SR)); mix[i:i + len(a)] += a
+        i = int(round(t * TTS_SR)); seg = mix[i:i + len(a)]; seg += a[:len(seg)]
     sf.write(work / "voice_raw.wav", mix[: int(total * TTS_SR)], TTS_SR)
     loudnorm(work / "voice_raw.wav", work / "voice.wav",
              pre="highpass=f=70,acompressor=threshold=-21dB:ratio=2.2:attack=8:release=120")
@@ -334,8 +341,11 @@ def master_audio(clips, total, music, music_level, work):
 
     log(f"mixing music bed '{music.name}' ({music_level} dB under the voice, auto-ducked)")
     n = len(voice)
+    # cut the music's low end (standard under narration): leaves room for the voice and keeps the music
+    # audible on laptop and phone speakers, which can't reproduce bass anyway
     raw = run([FFMPEG, "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-i", music,
-               "-t", f"{n / SR:.3f}", "-ac", 2, "-ar", SR, "-f", "f32le", "-"], capture_output=True).stdout
+               "-t", f"{n / SR:.3f}", "-af", "highpass=f=140:poles=2", "-ac", 2, "-ar", SR, "-f", "f32le", "-"],
+              capture_output=True).stdout
     bed = np.frombuffer(raw, dtype=np.float32).reshape(-1, 2)[:n]
     bed = np.pad(bed, ((0, n - len(bed)), (0, 0)))
     import pyloudnorm
@@ -411,17 +421,23 @@ STEPS = [("voice", "Recording the voiceover", 0.14), ("layout", "Timing the anim
          ("frames", "Animating the slides", 0.72), ("audio", "Mixing the sound", 0.08), ("finish", "Finishing up", 0.03)]
 
 
-def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", music_level=20.0,
-            scenes_limit=None, workers=None, progress=None):
-    """Convert one module. `progress(fraction, label)` is called as work advances. Returns a summary dict."""
+def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", music_volume="balanced",
+            scenes_limit=None, workers=None, progress=None, quality="1440p", preview_seconds=None):
+    """Convert one module. `progress(fraction, label)` is called as work advances. Returns a summary dict.
+
+    music_volume: "subtle" | "balanced" | "present", or dB under the voice while it speaks.
+    preview_seconds: render only the opening N seconds (quicker encode), for trying out settings."""
+    if quality not in QUALITIES: raise ConversionError(f"Unknown quality '{quality}' — use {', '.join(QUALITIES)}.")
+    music_level = MUSIC_VOLUMES[music_volume] if music_volume in MUSIC_VOLUMES else float(music_volume)
     html = pathlib.Path(html).resolve()
     if not html.exists(): raise ConversionError(f"{html} not found")
     out = pathlib.Path(out or html.with_suffix(".mp4")).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     workers = workers or max(1, (os.cpu_count() or 4) // 2)
     # cache is per input (not per output) so music/caption variants reuse the rendered picture
-    tag = hashlib.sha1(str(html).encode()).hexdigest()[:8]
-    work = CACHE / "renders" / f"{html.stem}-{tag}{f'-scenes{scenes_limit}' if scenes_limit else ''}"
+    tag = hashlib.sha1(html.read_bytes()).hexdigest()[:8]                   # same content -> same cache
+    suffix = (f"-scenes{scenes_limit}" if scenes_limit else "") + (f"-preview{preview_seconds:g}" if preview_seconds else "")
+    work = CACHE / "renders" / f"{html.stem}-{tag}-{quality}{suffix}"
     work.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
@@ -439,10 +455,22 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     music_path = resolve_music(music)
     log(f"{html.name}: {len(scenes)} scene(s), {sum(len(s['chunks']) for s in scenes)} sentences")
 
-    audio = synthesize(scenes, voice, speed, CACHE / "tts", step("voice"))
+    voice_progress = step("voice")
+    spans = measure_spans(html, ids)
+    if preview_seconds:      # narrate only as many scenes as the preview needs
+        for n in range(1, len(scenes) + 1):
+            audio = synthesize(scenes[:n], voice, speed, CACHE / "tts", voice_progress)
+            events, clips, total = build_timeline(scenes[:n], audio, spans[:n])
+            if total >= preview_seconds: break
+        total = min(total, float(preview_seconds))
+        events = [e for e in events if e[0] < total]
+        clips = [c for c in clips if c[0] < total]
+    else:
+        audio = synthesize(scenes, voice, speed, CACHE / "tts", voice_progress)
+        events, clips, total = build_timeline(scenes, audio, spans)
     step("layout")
-    events, clips, total = build_timeline(scenes, audio, measure_spans(html, ids))
-    video = render_video(html, ids, events, total, work, workers, step("frames"))
+    video = render_video(html, ids, events, total, work, workers, step("frames"),
+                         size=QUALITIES[quality], fast=bool(preview_seconds))
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
     step("finish")
@@ -467,8 +495,11 @@ def main():
     ap.add_argument("--voice", default="af_heart", help=f"Kokoro voice ({', '.join(VOICES)}, ...)")
     ap.add_argument("--speed", type=float, default=0.90, help="narration speed (default 0.90)")
     ap.add_argument("--music", default="gentle-pulse", help=f"background music: {', '.join(music_beds.STYLES)} (built-in, default gentle-pulse), path to any audio file, or none")
-    ap.add_argument("--music-level", type=float, default=20, help="dB the music sits under the voice while speaking (default 20)")
-    ap.add_argument("--scenes", type=int, help="only render the first N scenes (for previews)")
+    ap.add_argument("--music-volume", default="balanced",
+                    help=f"music loudness under the voice: {', '.join(MUSIC_VOLUMES)} (default balanced), or dB below the voice")
+    ap.add_argument("--quality", default="1440p", choices=list(QUALITIES), help="output resolution (default 1440p, sharpest)")
+    ap.add_argument("--preview", type=float, metavar="SECONDS", help="render only the first SECONDS (to try settings)")
+    ap.add_argument("--scenes", type=int, help="only render the first N scenes")
     ap.add_argument("--workers", type=int, help="parallel render processes (default: half the CPU cores)")
     a = ap.parse_args()
 
@@ -478,7 +509,8 @@ def main():
         if label != shown["label"] or pct >= shown["pct"] + 10:
             print(f"[html2mp4] {pct:3d}%  {label}", flush=True); shown.update(label=label, pct=pct)
     try:
-        convert(a.html, a.out, a.voice, a.speed, a.music, a.music_level, a.scenes, a.workers, progress)
+        convert(a.html, a.out, a.voice, a.speed, a.music, a.music_volume, a.scenes, a.workers, progress,
+                quality=a.quality, preview_seconds=a.preview)
     except ConversionError as e:
         sys.exit(f"[html2mp4] error: {e}")
 

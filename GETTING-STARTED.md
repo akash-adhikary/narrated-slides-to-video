@@ -74,8 +74,11 @@ The Studio opens in your web browser. **Leave the Terminal window open** while y
    number of slides and roughly how long the video will be. Click *Read the narration script* to check the wording.
 2. **Narrator.** Press ▶ to hear each voice and click the one you like. Choose a pace: *Relaxed*, *Natural* or *Brisk*.
 3. **Background music.** Press ▶ to preview. The music automatically gets quieter whenever the narrator speaks.
-   Choose *No music* if you prefer, or upload your own royalty-free track.
-4. Click **Create video**. A 2–3 minute module takes about 4–6 minutes. You can use other apps meanwhile.
+   Choose how noticeable it is (*Subtle*, *Balanced* or *Present*), choose *No music*, or upload your own royalty-free track.
+4. **Video quality.** Leave it on *Sharpest · 1440p* (crisp text, still a small file). *Faster · 1080p* is quicker to make.
+5. **Try it first.** Click **Preview 10 s** to hear the first 10 seconds with your choices. It takes about half a minute.
+   Change anything and preview again until you're happy.
+6. Click **Create video**. A 2–3 minute module takes about 5–8 minutes. You can use other apps meanwhile.
 
 When it's done, the video plays right on the page. Click **Download video**, or **Show in folder**. Every video is
 also saved automatically in **Downloads › Narrated Videos**, together with two caption files:

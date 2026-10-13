@@ -33,6 +33,7 @@
   button,input{font:inherit;color:inherit}
   button{cursor:pointer;background:none;border:0}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
+  [hidden]{display:none!important}
   .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
   /* top bar */
@@ -141,6 +142,27 @@
   .btn:active{transform:translateY(1px)}
   .btn svg{width:16px;height:16px;fill:currentColor}
   .btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none}
+
+  .row.first{margin-top:0;padding-top:0;border-top:0;margin-bottom:22px}
+  .row.off{opacity:.4;pointer-events:none}
+  .btn-2{display:inline-flex;align-items:center;justify-content:center;gap:9px;height:50px;padding:0 20px;border-radius:14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:600;font-size:15px;white-space:nowrap;transition:background .15s,border-color .15s}
+  .btn-2:hover{background:var(--line-2)}
+  .btn-2 svg{width:16px;height:16px;stroke:currentColor}
+  .btn-2:disabled{opacity:.35;cursor:not-allowed}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+
+  /* preview */
+  .pv{display:none;margin-bottom:22px}
+  .pv.show{display:block}
+  .pv-wait{aspect-ratio:16/9;border-radius:14px;border:1px dashed var(--line);background:var(--surface-2);display:grid;place-items:center;text-align:center;color:var(--muted);font-size:14.5px}
+  .pv-wait b{display:block;color:var(--ink);font-weight:600;font-size:16px;margin-bottom:6px}
+  .pv-wait .mini{width:220px;height:6px;border-radius:999px;background:var(--line-2);overflow:hidden;margin:14px auto 0}
+  .pv-wait .mini i{display:block;height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .5s}
+  .pv-meta{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13.5px;color:var(--muted);flex-wrap:wrap}
+  .pv-meta b{color:var(--ink);font-weight:600}
+  .stale{display:none;font-size:12.5px;font-weight:600;color:#a15c00;background:#fff3e0;padding:3px 9px;border-radius:999px}
+  @media (prefers-color-scheme: dark){ .stale{color:#ffb74d;background:#3a2a12} }
+  .stale.show{display:inline-block}
 
   /* progress */
   .prog{display:none}
@@ -284,14 +306,39 @@
   <section class="card locked" id="cardMusic" aria-labelledby="h3x">
     <div class="card-h"><span class="num">3</span><h2 id="h3x">Background music</h2><p>Plays softly and dips whenever the narrator speaks</p></div>
     <div class="grid" id="music" role="radiogroup" aria-label="Background music"></div>
+    <div class="row" id="volRow">
+      <div class="row-label">Music volume<small>How noticeable the music is under the voice</small></div>
+      <div class="seg" id="vol" role="radiogroup" aria-label="Music volume">
+        <button role="radio" data-v="subtle" aria-checked="false">Subtle</button>
+        <button role="radio" data-v="balanced" aria-checked="true">Balanced</button>
+        <button role="radio" data-v="present" aria-checked="false">Present</button>
+      </div>
+    </div>
     <div class="own" id="own">Prefer your own track? <label for="ownInput">Upload a royalty-free audio file</label><input type="file" id="ownInput" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg"></div>
   </section>
 
   <!-- 4. create / progress / result -->
   <section class="card locked" id="cardCreate" aria-live="polite">
-    <div class="create" id="create">
-      <div class="create-sum" id="createSum">Add a module to get started.</div>
-      <button class="btn" id="go" disabled><svg viewBox="0 0 16 16"><path d="M4 2.5v11l9.5-5.5z"/></svg>Create video</button>
+    <div id="create">
+      <div class="row first">
+        <div class="row-label">Video quality<small id="qualHint">Sharpest text, still a small web-friendly file</small></div>
+        <div class="seg" id="qual" role="radiogroup" aria-label="Video quality">
+          <button role="radio" data-v="1440p" aria-checked="true">Sharpest · 1440p</button>
+          <button role="radio" data-v="1080p" aria-checked="false">Faster · 1080p</button>
+        </div>
+      </div>
+      <div class="pv" id="pv">
+        <div class="pv-wait" id="pvWait"><div><b>Preparing your preview</b><span id="pvLabel">Getting ready</span><div class="mini"><i id="pvBar"></i></div></div></div>
+        <div class="player" id="pvPlayerWrap" hidden><video id="pvPlayer" controls playsinline></video></div>
+        <div class="pv-meta"><span id="pvMeta"></span><span class="stale" id="pvStale">Settings changed, preview again to hear them</span></div>
+      </div>
+      <div class="create">
+        <div class="create-sum" id="createSum">Add a module to get started.</div>
+        <div class="actions">
+          <button class="btn-2" id="pvGo" disabled><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/></svg><span id="pvGoText">Preview 10 s</span></button>
+          <button class="btn" id="go" disabled><svg viewBox="0 0 16 16"><path d="M4 2.5v11l9.5-5.5z"/></svg>Create video</button>
+        </div>
+      </div>
     </div>
 
     <div class="prog" id="prog">
@@ -338,7 +385,9 @@
 const $ = s => document.querySelector(s);
 const STEPS = ["Recording the voiceover","Timing the animations","Animating the slides","Mixing the sound","Finishing up"];
 const SHORT = ["Voiceover","Timing","Animation","Sound mix","Finishing"];
-const state = { upload:null, voice:"af_heart", speed:0.9, music:"gentle-pulse", ownName:null, job:null, options:null };
+const state = { upload:null, voice:"af_heart", speed:0.9, music:"gentle-pulse", volume:"balanced", quality:"1440p", job:null, options:null, preview:null };
+const VOL = {subtle:"subtle", balanced:"balanced", present:"present"};
+const settingsKey = () => [state.upload?.upload_id, state.voice, state.speed, state.music, state.volume].join("|");
 const fmt = s => { s = Math.max(0, Math.round(s)); const m = Math.floor(s/60); return m ? `${m} min ${String(s%60).padStart(2,"0")} s` : `${s} s`; };
 const clock = s => { s = Math.round(s); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -375,8 +424,19 @@ function tile(group, id, name, desc, previewUrl, extra=""){
 function select(group, id){
   state[group] = id;
   document.querySelectorAll(`#${group === "voice" ? "voices" : "music"} .tile`).forEach(t => t.setAttribute("aria-checked", t.dataset.id === id));
+  $("#volRow").classList.toggle("off", state.music === "none");
   summary();
 }
+function seg(sel, key, after){
+  document.querySelectorAll(`${sel} button`).forEach(b => b.addEventListener("click", () => {
+    state[key] = isNaN(+b.dataset.v) ? b.dataset.v : parseFloat(b.dataset.v);
+    document.querySelectorAll(`${sel} button`).forEach(x => x.setAttribute("aria-checked", x === b));
+    after && after(); summary();
+  }));
+}
+seg("#vol", "volume");
+seg("#qual", "quality", () => { $("#qualHint").textContent = state.quality === "1440p"
+  ? "Sharpest text, still a small web-friendly file" : "Full HD, quicker to make and a little smaller"; });
 async function loadOptions(){
   const o = state.options = await api("/api/options");
   $("#outDir").textContent = o.output.replace(/^\/Users\/[^/]+/, "~");
@@ -386,11 +446,7 @@ async function loadOptions(){
   o.music.forEach(m => $("#music").append(tile("music", m.id, m.name, m.desc, `/api/music-preview/${m.id}`, m.id === "gentle-pulse" ? `<span class="badge">Default</span>` : "")));
   select("voice", state.voice); select("music", state.music);
 }
-document.querySelectorAll("#pace button").forEach(b => b.addEventListener("click", () => {
-  state.speed = parseFloat(b.dataset.v);
-  document.querySelectorAll("#pace button").forEach(x => x.setAttribute("aria-checked", x === b));
-  stopAudio(); summary();
-}));
+seg("#pace", "speed", stopAudio);
 $("#ownInput").addEventListener("change", async e => {
   const f = e.target.files[0]; if(!f) return;
   const fd = new FormData(); fd.append("file", f);
@@ -435,18 +491,59 @@ function summary(){
   const v = state.options.voices.find(x => x.id === state.voice);
   const m = state.music === "none" ? "no music" : (state.options.music.find(x => x.id === state.music)?.name.toLowerCase() || "your track");
   const len = u.words / 2.4 / state.speed;
-  const make = 40 + len * 1.4;
-  $("#createSum").innerHTML = `<b>${esc(v.name)}</b> voice, ${esc(m)}. About <b>${fmt(len)}</b> of video, ready in roughly ${Math.max(1, Math.round(make / 60))} min.`;
+  const make = 40 + len * (state.quality === "1080p" ? 1.4 : 2.2);
+  const vol = state.music === "none" ? "" : ` at ${state.volume} volume`;
+  $("#createSum").innerHTML = `<b>${esc(v.name)}</b> voice, ${esc(m)}${vol}. About <b>${fmt(len)}</b> of video, ready in roughly ${Math.max(1, Math.round(make / 60))} min.`;
   $("#go").disabled = false;
+  $("#pvGo").disabled = state.preview && state.preview.status === "running";
+  $("#pvStale").classList.toggle("show", !!(state.preview && state.preview.done && state.preview.key !== settingsKey()));
 }
+
+/* ---------- preview ---------- */
+const jobBody = () => ({upload_id: state.upload.upload_id, voice: state.voice, speed: state.speed, music: state.music,
+                        music_volume: state.volume, quality: state.quality});
+function describe(){
+  const v = state.options.voices.find(x => x.id === state.voice).name;
+  const pace = {0.85:"relaxed", 0.9:"natural", 1:"brisk"}[state.speed];
+  const m = state.music === "none" ? "no music" : `${(state.options.music.find(x => x.id === state.music)?.name || "your track").toLowerCase()} (${state.volume})`;
+  return `<b>${state.options.preview_seconds}-second preview</b> · ${esc(v)}, ${pace} pace · ${esc(m)}`;
+}
+$("#pvGo").addEventListener("click", async () => {
+  stopAudio(); $("#pvPlayer").pause();
+  const key = settingsKey(), meta = describe();
+  $("#pv").classList.add("show"); $("#pvWait").hidden = false; $("#pvPlayerWrap").hidden = true;
+  $("#pvLabel").textContent = "Getting ready"; $("#pvBar").style.width = "3%"; $("#pvMeta").innerHTML = meta; $("#pvStale").classList.remove("show");
+  $("#pvGo").disabled = true; $("#pvGoText").textContent = "Preparing…";
+  try{
+    const j = await api("/api/preview", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(jobBody())});
+    state.preview = {id: j.id, key, status: "running"};
+    clearInterval(state.pvTimer);
+    state.pvTimer = setInterval(async () => {
+      const x = await api(`/api/jobs/${j.id}`).catch(() => null); if(!x) return;
+      $("#pvLabel").textContent = x.status === "queued" ? "Waiting for the video being created to finish" : `${x.label}… ${Math.round(x.progress * 100)}%`;
+      $("#pvBar").style.width = Math.max(3, Math.round(x.progress * 100)) + "%";
+      if(x.status === "done" || x.status === "failed"){
+        clearInterval(state.pvTimer); state.preview.status = x.status; state.preview.done = x.status === "done";
+        $("#pvGo").disabled = false; $("#pvGoText").textContent = "Preview again";
+        if(x.status === "failed"){ $("#pv").classList.remove("show"); toast(x.error || "The preview couldn't be made"); return; }
+        const pl = $("#pvPlayer");
+        pl.innerHTML = `<track kind="captions" srclang="en" label="English" src="${fileUrl(x.id, "vtt")}">`;
+        pl.src = fileUrl(x.id, "mp4");
+        $("#pvWait").hidden = true; $("#pvPlayerWrap").hidden = false;
+        pl.play().catch(() => {});
+        summary();
+      }
+    }, 600);
+  }catch(err){ toast(err.message); $("#pvGo").disabled = false; $("#pvGoText").textContent = "Preview 10 s"; }
+});
 
 /* ---------- create & progress ---------- */
 $("#steps").innerHTML = SHORT.map(s => `<div class="step"><i></i><span>${s}</span></div>`).join("");
 $("#go").addEventListener("click", async () => {
-  stopAudio(); $("#go").disabled = true;
+  stopAudio(); $("#pvPlayer").pause(); $("#go").disabled = true;
   try{
     const j = await api("/api/jobs", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({upload_id: state.upload.upload_id, voice: state.voice, speed: state.speed, music: state.music})});
+      body: JSON.stringify(jobBody())});
     track(j);
   }catch(err){ toast(err.message); $("#go").disabled = false; }
 });
