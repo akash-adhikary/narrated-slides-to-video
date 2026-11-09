@@ -1,0 +1,104 @@
+"""User settings: the Anthropic API key and the brand kit.
+
+Settings live in ~/.config/html2mp4/settings.json (override with HTML2MP4_CONFIG), not in the cache, so clearing the
+cache never loses them. The file is written with owner-only permissions because it can hold an API key.
+"""
+import json, os, pathlib, re
+
+CONFIG_DIR = pathlib.Path(os.environ.get("HTML2MP4_CONFIG", pathlib.Path.home() / ".config" / "html2mp4"))
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+
+DESIGN_MODEL = "claude-opus-5-5"     # designs slides from scripts
+
+FONTS = ["Inter", "Geist", "IBM Plex Sans", "Source Sans 3", "Poppins", "DM Sans", "Merriweather", "Lora"]
+STYLES = ("dark", "light")
+
+DEFAULT_BRAND = {
+    "style": "dark",                 # dark or light slides
+    "background": "#0f1222",         # slide background
+    "text": "#f4f5fa",               # main text
+    "accent": "#7c83ff",             # headings, highlights, progress
+    "accent2": "#3dd6c6",            # secondary highlight
+    "heading_font": "Inter",
+    "body_font": "Inter",
+    "footer_text": "",
+    "logo": "",                      # data URI, or empty
+}
+LOGO_MAX_BYTES = 512 * 1024
+
+
+def load():
+    try:
+        data = json.loads(SETTINGS_FILE.read_text())
+    except (FileNotFoundError, ValueError):
+        data = {}
+    data["brand"] = {**DEFAULT_BRAND, **data.get("brand", {})}
+    return data
+
+
+def save(data):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = SETTINGS_FILE.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, SETTINGS_FILE)
+
+
+# ---------------------------------------------------------------- API key
+
+def api_key():
+    """The key to use: one saved in Settings wins over ANTHROPIC_API_KEY. None lets the SDK resolve credentials
+    itself (ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile)."""
+    return load().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY") or None
+
+
+def api_key_status():
+    saved = load().get("anthropic_api_key")
+    key, source = (saved, "settings") if saved else (os.environ.get("ANTHROPIC_API_KEY"), "environment")
+    if not key: return {"set": False, "source": None, "masked": None}
+    return {"set": True, "source": source, "masked": f"{key[:7]}…{key[-4:]}" if len(key) > 14 else "set"}
+
+
+def set_api_key(key):
+    data = load(); data["anthropic_api_key"] = key.strip(); save(data)
+
+
+def clear_api_key():
+    data = load(); data.pop("anthropic_api_key", None); save(data)
+
+
+# ---------------------------------------------------------------- brand
+
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def brand():
+    return load()["brand"]
+
+
+def update_brand(changes):
+    """Validate and save brand fields; unknown fields are ignored. Returns the full brand."""
+    b = brand()
+    for k, v in changes.items():
+        if k not in DEFAULT_BRAND or k == "logo": continue
+        if k in ("background", "text", "accent", "accent2"):
+            if not HEX.match(str(v)): raise ValueError(f"{k} must be a colour like #1a2b3c")
+        elif k in ("heading_font", "body_font"):
+            if v not in FONTS: raise ValueError(f"{k} must be one of: {', '.join(FONTS)}")
+        elif k == "style":
+            if v not in STYLES: raise ValueError("style must be dark or light")
+        elif k == "footer_text":
+            v = str(v)[:80]
+        b[k] = v
+    data = load(); data["brand"] = b; save(data)
+    return b
+
+
+def set_logo(data_uri):
+    data = load(); data["brand"]["logo"] = data_uri; save(data)
+
+
+def reset_brand():
+    data = load(); data["brand"] = dict(DEFAULT_BRAND); save(data)
+    return data["brand"]

@@ -8,15 +8,16 @@ import json, os, pathlib, queue, re, shutil, socket, subprocess, sys, threading,
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import cli, music as music_beds
+from html2mp4 import cli, compose, config, music as music_beds, script
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
 JOBS_FILE = HOME / "jobs.json"
 OUTPUT = pathlib.Path(os.environ.get("HTML2MP4_OUTPUT", pathlib.Path.home() / "Downloads" / "Narrated Videos"))
-INDEX = pathlib.Path(__file__).with_name("studio.html")
+WEB = pathlib.Path(__file__).with_name("web")
 SAMPLE_TEXT = "Hi there. I'll be narrating your module, clearly and at a comfortable pace."
 MUSIC_INFO = {
     "gentle-pulse": ("Gentle pulse", "Soft chords with a light, steady rhythm"),
@@ -25,6 +26,7 @@ MUSIC_INFO = {
 }
 
 app = FastAPI(title="html2mp4 Studio", docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory=WEB), name="static")
 jobs: dict[str, dict] = {}
 # two lanes so a quick preview never waits behind a full video; each lane does one job at a time
 queues: dict[str, "queue.Queue[str]"] = {"video": queue.Queue(), "preview": queue.Queue()}
@@ -133,7 +135,7 @@ def warm_up():
 # ---------------------------------------------------------------- API
 
 @app.get("/", response_class=HTMLResponse)
-def index(): return INDEX.read_text()
+def index(): return (WEB / "index.html").read_text()
 
 
 @app.get("/api/options")
@@ -286,6 +288,103 @@ def reveal(jid: str):
     elif sys.platform == "win32": subprocess.run(["explorer", "/select,", p])
     else: subprocess.run(["xdg-open", str(pathlib.Path(p).parent)])
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- settings
+
+BRAND_PREVIEW = script.parse("""Title: Your Module Title
+Subtitle: Programme name · Module 1
+Say: This is how a title slide looks.
+
+## How content slides look
+Show: Clear headings · Your colours and fonts · Your logo and footer
+Say: Content slides use your colours and fonts.
+Say: Points appear one by one as the narrator speaks.
+""")
+
+
+def anthropic_client(key=None):
+    import anthropic
+    return anthropic.Anthropic(api_key=key or config.api_key(), max_retries=1, timeout=20)
+
+
+def verify_key(key=None):
+    """Make one free metadata call to check the key works; raise HTTPException with a plain message if not."""
+    import anthropic
+    try:
+        anthropic_client(key).models.retrieve(config.DESIGN_MODEL)
+    except anthropic.AuthenticationError:
+        raise HTTPException(400, "Anthropic didn't accept that key. Check it was copied completely.")
+    except anthropic.PermissionDeniedError:
+        raise HTTPException(400, "That key doesn't have access to the model used for designing slides.")
+    except anthropic.APIConnectionError:
+        raise HTTPException(503, "Couldn't reach Anthropic. Check your internet connection.")
+    except anthropic.APIStatusError as e:
+        raise HTTPException(502, f"Anthropic returned an error ({e.status_code}). Try again in a moment.")
+    except TypeError:          # no credentials anywhere: the SDK can't build a request
+        raise HTTPException(400, "No API key is set. Paste one in Settings.")
+
+
+@app.get("/api/settings")
+def get_settings():
+    return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.FONTS}
+
+
+class KeyIn(BaseModel):
+    key: str
+
+
+@app.put("/api/settings/api-key")
+def put_api_key(body: KeyIn):
+    key = body.key.strip()
+    if not key.startswith("sk-ant-"): raise HTTPException(400, "That doesn't look like an Anthropic key. Keys start with sk-ant-.")
+    verify_key(key)
+    config.set_api_key(key)
+    return config.api_key_status()
+
+
+@app.post("/api/settings/api-key/test")
+def test_api_key():
+    if not config.api_key_status()["set"]: raise HTTPException(400, "No API key is set yet. Paste one above.")
+    verify_key()
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key")
+def delete_api_key():
+    config.clear_api_key()
+    return config.api_key_status()
+
+
+@app.put("/api/settings/brand")
+def put_brand(changes: dict):
+    try: return config.update_brand(changes)
+    except ValueError as e: raise HTTPException(400, str(e))
+
+
+@app.post("/api/settings/brand/reset")
+def reset_brand(): return config.reset_brand()
+
+
+@app.post("/api/settings/logo")
+async def post_logo(file: UploadFile = File(...)):
+    types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp"}
+    mime = types.get(pathlib.Path(file.filename or "").suffix.lower())
+    if not mime: raise HTTPException(400, "Please choose a PNG, JPG, SVG or WebP image.")
+    data = await file.read()
+    if len(data) > config.LOGO_MAX_BYTES: raise HTTPException(400, "That image is larger than 512 KB. Try a smaller or compressed version.")
+    import base64
+    config.set_logo(f"data:{mime};base64,{base64.b64encode(data).decode()}")
+    return config.brand()
+
+
+@app.delete("/api/settings/logo")
+def delete_logo():
+    config.set_logo(""); return config.brand()
+
+
+@app.get("/api/settings/brand-preview", response_class=HTMLResponse)
+def brand_preview(): return compose.basic_module(BRAND_PREVIEW, config.brand())
 
 
 # ---------------------------------------------------------------- main

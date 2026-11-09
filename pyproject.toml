@@ -33,7 +33,11 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "python-multipart>=0.0.9",
+    "anthropic>=2.6",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
 
 [project.urls]
 Homepage = "https://github.com/akash-adhikary/narrated-slides-to-video"
@@ -45,6 +49,7 @@ Changelog = "https://github.com/akash-adhikary/narrated-slides-to-video/blob/mai
 html2mp4 = "html2mp4.cli:main"
 html2mp4-music = "html2mp4.music:main"
 html2mp4-studio = "html2mp4.studio:main"
+html2mp4-script = "html2mp4.compose:main"
 
 [build-system]
 requires = ["hatchling"]
