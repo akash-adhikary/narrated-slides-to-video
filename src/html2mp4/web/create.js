@@ -81,19 +81,24 @@ async function upload(f){
   $("#uploadErr").classList.remove("show");
   drop.classList.add("busy"); $("#dropText").textContent = "Reading your module";
   const fd = new FormData(); fd.append("file", f);
-  try{
-    const u = state.upload = await api("/api/inspect", {method:"POST", body:fd});
-    drop.style.display = "none"; $("#file").classList.add("show");
-    $("#fileTitle").textContent = u.title;
-    const mins = Math.max(1, Math.round(u.words / 2.4 / state.speed / 60));
-    $("#fileMeta").innerHTML = `<span>${esc(u.filename)}</span><i>·</i><span>${u.scenes.length} slides</span><i>·</i><span>${u.sentences} sentences</span><i>·</i><span>about ${mins} min of video</span>`;
-    $("#scriptBody").innerHTML = u.scenes.map((s, i) => `<div class="scene"><h4>Slide ${i + 1}</h4>${s.chunks.map(c => `<p>${esc(c)}</p>`).join("")}</div>`).join("");
-    $("#script").hidden = false;
-    ["#cardVoice","#cardMusic","#cardCreate"].forEach(s => $(s).classList.remove("locked"));
-    summary(); toast("Module loaded");
-  }catch(err){
-    $("#uploadErr").textContent = err.message; $("#uploadErr").classList.add("show");
-  }finally{ drop.classList.remove("busy"); $("#dropText").textContent = "Drop your HTML file here"; }
+  try{ showUpload(await api("/api/inspect", {method:"POST", body:fd})); toast("Module loaded"); }
+  catch(err){ $("#uploadErr").textContent = err.message; $("#uploadErr").classList.add("show"); }
+  finally{ drop.classList.remove("busy"); $("#dropText").textContent = "Drop your HTML file here"; }
+}
+
+// Show a module that's been read (an upload, or one designed on the Write page) and unlock the next steps.
+function showUpload(u){
+  state.upload = u;
+  $("#uploadErr").classList.remove("show");
+  drop.style.display = "none"; $("#file").classList.add("show");
+  $("#fileTitle").textContent = u.title;
+  const mins = Math.max(1, Math.round(u.words / 2.4 / state.speed / 60));
+  $("#fileMeta").innerHTML = `<span>${esc(u.filename)}</span><i>·</i><span>${u.scenes.length} slides</span><i>·</i><span>${u.sentences} sentences</span><i>·</i><span>about ${mins} min of video</span>`;
+  $("#scriptBody").innerHTML = u.scenes.map((s, i) => `<div class="scene"><h4>Slide ${i + 1}</h4>${s.chunks.map(c => `<p>${esc(c)}</p>`).join("")}</div>`).join("");
+  $("#script").hidden = false;
+  ["#cardVoice","#cardMusic","#cardCreate"].forEach(s => $(s).classList.remove("locked"));
+  if(state.preview){ state.preview = null; $("#pv").classList.remove("show"); previewIdle("Preview 10 s"); }
+  summary();
 }
 
 function summary(){

@@ -31,6 +31,33 @@ The Studio isn't running. Double-click **Open Studio.command** again and keep it
 **"The app isn't installed yet."**
 `setup.sh` hasn't completed in this folder. Run `./setup.sh`.
 
+## Writing and designing
+
+**"Designing slides needs an Anthropic API key."**
+Open **Settings**, paste your key under *Anthropic API key* and click *Save and verify*. You can also use **Quick layout**
+on the Write page, which needs no key.
+
+**"Anthropic didn't accept that key."**
+Check it was copied completely (it starts with `sk-ant-`). A key saved in Settings takes priority over one set in your
+environment.
+
+**The script box says "Line N: not sure what this is".**
+A line doesn't start with a marker. In the Say/Show format, lines begin with `Say:`, `Show:`, `Note:` or `## `. See
+[From script to slides](scripts.md#writing-a-script).
+
+**The design takes a long time.**
+A six-slide module usually takes 4 to 8 minutes: most of it is Claude composing the layouts. It carries on if you leave
+the page. If it stays stuck, check your internet connection.
+
+**The checker still lists a problem after the fix rounds.**
+Two rounds of automatic fixes is the limit. Describe the change you want in *Ask for a change*, naming the slide.
+
+**A slide uses a word that isn't in my script.**
+That's a note, not an error: labels are often shortened or reworded. Check it says what you mean; ask for a change if not.
+
+**The preview looks different from my brand.**
+Check **Settings › Brand kit**, then ask for the whole module to be redesigned with a note about what's off.
+
 ## Making videos
 
 **"This file doesn't contain a narration script."**

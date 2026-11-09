@@ -3,7 +3,7 @@
 usage: html2mp4-studio            # opens http://127.0.0.1:8765 in your browser
 Videos are saved to ~/Downloads/Narrated Videos (override with HTML2MP4_OUTPUT).
 """
-import json, os, pathlib, queue, re, shutil, socket, subprocess, sys, threading, time, uuid, webbrowser
+import dataclasses, json, os, pathlib, queue, re, shutil, socket, subprocess, sys, threading, time, uuid, webbrowser
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import brandkit, cli, compose, config, music as music_beds, script
+from html2mp4 import ai, brandkit, cli, compose, config, design, music as music_beds, projects, review, script, verify
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
@@ -155,14 +155,12 @@ def options():
             "output": str(OUTPUT)}
 
 
-@app.post("/api/inspect")
-async def inspect(file: UploadFile = File(...)):
-    if not re.search(r"\.html?$", file.filename or "", re.I):
-        raise HTTPException(400, "Please choose an .html file.")
+def register_upload(filename, data):
+    """Stage a module for the Create video page and describe it."""
     uid = uuid.uuid4().hex[:12]
     folder = UPLOADS / uid; folder.mkdir(parents=True)
-    path = folder / re.sub(r"[^\w.\- ]+", "_", file.filename)
-    path.write_bytes(await file.read())
+    path = folder / re.sub(r"[^\w.\- ]+", "_", filename)
+    path.write_bytes(data)
     text = path.read_text(encoding="utf-8", errors="replace")
     try:
         scenes = cli.load_scenes(text)
@@ -170,8 +168,15 @@ async def inspect(file: UploadFile = File(...)):
         shutil.rmtree(folder); raise HTTPException(422, str(e))
     words = sum(len(c.split()) for s in scenes for c in s["chunks"])
     sentences = sum(len(s["chunks"]) for s in scenes)
-    return {"upload_id": uid, "filename": file.filename, "title": cli.page_title(text, path.stem),
+    return {"upload_id": uid, "filename": filename, "title": cli.page_title(text, path.stem),
             "scenes": scenes, "sentences": sentences, "words": words}
+
+
+@app.post("/api/inspect")
+async def inspect(file: UploadFile = File(...)):
+    if not re.search(r"\.html?$", file.filename or "", re.I):
+        raise HTTPException(400, "Please choose an .html file.")
+    return register_upload(file.filename, await file.read())
 
 
 @app.post("/api/music-upload")
@@ -428,6 +433,249 @@ def brandkit_remove(): return brandkit.remove_kit()
 
 @app.get("/api/settings/brand-preview", response_class=HTMLResponse)
 def brand_preview(): return compose.basic_module(BRAND_PREVIEW, config.brand())
+
+
+# ---------------------------------------------------------------- write: script -> module
+
+design_jobs: dict[str, dict] = {}
+design_lock = threading.Lock()            # one design at a time: each uses the machine and the API heavily
+
+
+def outline(m):
+    return {"title": m.title, "subtitle": m.subtitle, "sentences": m.sentences, "words": m.words,
+            "seconds": round(m.words / 2.2 + m.sentences * 0.45 + len(m.slides) * 0.9 + 2.2),
+            "intro": m.intro, "slides": [dataclasses.asdict(x) | {"id": f"s{i + 1}"} for i, x in enumerate(m.slides)]}
+
+
+def parse_or_422(text, title=None, subtitle=None):
+    try: return script.parse(text, title or None, subtitle or None)
+    except script.ScriptError as e: raise HTTPException(422, str(e))
+
+
+class ScriptIn(BaseModel):
+    script: str
+    title: str = ""
+    subtitle: str = ""
+
+
+@app.post("/api/write/parse")
+def write_parse(body: ScriptIn): return outline(parse_or_422(body.script, body.title, body.subtitle))
+
+
+@app.get("/api/write/example")
+def write_example(): return {"script": script.EXAMPLE}
+
+
+@app.post("/api/write/review")
+async def write_review(body: ScriptIn):
+    from starlette.concurrency import run_in_threadpool
+    parse_or_422(body.script, body.title, body.subtitle)
+    if not config.api_key_status()["set"]: raise HTTPException(400, "Checking your script needs an Anthropic API key. Add one in Settings.")
+    try: found, cost = await run_in_threadpool(review.review, body.script)
+    except ai.AIError as e: raise HTTPException(400, str(e))
+    return {"suggestions": found, "cost": round(cost, 3)}
+
+
+def moment_note(m):
+    """Approximate start times, so feedback like "at 2:51" can be matched to a slide."""
+    t, rows = 0.6, []
+    for i, sl in enumerate(m.slides):
+        rows.append(f"s{i + 1} ({sl.title}) starts at about {int(t // 60)}:{int(t % 60):02d}")
+        t += sum(len(x.split()) / 2.2 + 0.45 for x in sl.say) + 0.9
+    return "Times in the feedback (like 2:51) refer to the finished video. Approximate slide start times: " + "; ".join(rows) + "."
+
+
+def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
+    """Design, revise or just re-check slides in the background, then save the result as a new version."""
+    def progress(f, label): job.update(progress=round(f, 3), label=label)
+    with design_lock:
+        job.update(status="running", started=time.time(), label="Getting ready")
+        try:
+            p = projects.get(project_id)
+            m = script.parse(p["script"])
+            brand = config.brand()
+            ref = brandkit.reference_file().read_text() if brandkit.reference_file().exists() else None
+            prev = projects.slides(project_id) if p["versions"] else {}
+            if mode == "basic":
+                page = compose.basic_module(m, brand)
+                job.update(progress=0.3, label="Checking every slide, step by step")
+                found = verify.inspect(page, m, config.glossary()["banned"], shots=False)["issues"]
+                projects.save_version(project_id, page, None, note or "Quick layout", issues=found, mode="basic")
+                job.update(status="done", progress=1.0, label="Done", cost=0)
+                return
+            res = design.design(m, brand, reference=ref, previous=prev, only=only, feedback=feedback, progress=progress,
+                                timing_note=moment_note(m) if feedback else "")
+            problems = [i for i in res["issues"] if i.kind != "invented"] + [i for i in res["issues"] if i.kind == "invented"]
+            projects.save_version(project_id, res["html"], res["slides"], note, cost=res["cost"], issues=problems)
+            job.update(status="done", progress=1.0, label="Done", cost=round(res["cost"], 2))
+        except (ai.AIError, script.ScriptError) as e:
+            job.update(status="failed", error=str(e))
+        except Exception as e:  # noqa: BLE001 — surface anything unexpected, keep the Studio running
+            job.update(status="failed", error=f"Something went wrong while designing the slides ({type(e).__name__}: {e}).")
+
+
+def start_design(project_id, **kw):
+    jid = uuid.uuid4().hex[:10]
+    job = design_jobs[jid] = {"id": jid, "project": project_id, "status": "queued", "progress": 0.0, "label": "Waiting to start", "created": time.time()}
+    threading.Thread(target=run_design, args=(job, project_id), kwargs=kw, daemon=True).start()
+    return job
+
+
+class GenerateIn(ScriptIn):
+    mode: str = "design"
+
+
+@app.post("/api/write/generate")
+def write_generate(body: GenerateIn):
+    m = parse_or_422(body.script, body.title, body.subtitle)
+    if body.mode == "design" and not config.api_key_status()["set"]:
+        raise HTTPException(400, "Designing slides needs an Anthropic API key. Add one in Settings, or choose the quick layout.")
+    p = projects.create(m.title, body.script)
+    job = start_design(p["id"], note="First design" if body.mode == "design" else "Quick layout", mode=body.mode)
+    return {"job": job, "project": p["id"]}
+
+
+@app.get("/api/write/jobs/{jid}")
+def write_job(jid: str):
+    if jid not in design_jobs: raise HTTPException(404)
+    j = dict(design_jobs[jid])
+    if j["status"] == "running" and j["progress"] > 0.06:
+        j["eta"] = max(5, (time.time() - j["started"]) * (1 - j["progress"]) / j["progress"])
+    return j
+
+
+@app.get("/api/write/active")
+def write_active():
+    """Designs still running or waiting, so a reloaded page can pick them up again."""
+    return [dict(j) for j in design_jobs.values() if j["status"] in ("queued", "running")]
+
+
+def project_view(pid):
+    p = projects.get(pid)
+    if not p: raise HTTPException(404, "That module wasn't found.")
+    try: m = script.parse(p["script"]); outl = outline(m)
+    except script.ScriptError: outl = None
+    cur = next((v for v in p["versions"] if v["n"] == p["current"]), None)
+    return {**{k: p[k] for k in ("id", "title", "script", "created", "updated", "current", "feedback")},
+            "versions": [{k: v[k] for k in ("n", "at", "note", "cost", "mode")} for v in p["versions"]],
+            "issues": (cur or {}).get("issues", []), "outline": outl,
+            "slides": {k: {"layout": v["layout"], "summary": v["summary"]} for k, v in projects.slides(pid).items()}}
+
+
+@app.get("/api/projects")
+def list_projects(): return projects.listing()
+
+
+@app.get("/api/projects/{pid}")
+def get_project(pid: str): return project_view(pid)
+
+
+@app.delete("/api/projects/{pid}")
+def delete_project(pid: str):
+    projects.delete(pid); return {"ok": True}
+
+
+@app.get("/api/projects/{pid}/module.html", response_class=HTMLResponse)
+def project_module(pid: str, v: int | None = None):
+    p = projects.get(pid)
+    if not p: raise HTTPException(404)
+    page = projects.version_html(pid, v or p["current"])
+    if page is None: raise HTTPException(404, "That version doesn't exist.")
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+
+class ReviseIn(BaseModel):
+    feedback: str
+    scope: list[str] = []
+
+
+@app.post("/api/projects/{pid}/revise")
+def revise(pid: str, body: ReviseIn):
+    p = projects.get(pid)
+    if not p or not p["versions"]: raise HTTPException(404, "Design the slides first.")
+    if not config.api_key_status()["set"]: raise HTTPException(400, "Add your Anthropic API key in Settings first.")
+    if not body.feedback.strip(): raise HTTPException(400, "Write what you'd like changed.")
+    projects.add_feedback(pid, body.feedback.strip(), body.scope or "all")
+    return {"job": start_design(pid, only=body.scope or None, feedback=body.feedback.strip(), note=f"Feedback: {body.feedback.strip()[:70]}")}
+
+
+def changed_slides(old_text, new_text):
+    """Slide ids whose script changed (or are new), so only those are redesigned after an edit."""
+    old, new = script.parse(old_text), script.parse(new_text)
+    key = lambda s: (s.title, s.say, s.show, s.screen, s.note)
+    return [f"s{i + 1}" for i, s in enumerate(new.slides) if i >= len(old.slides) or key(s) != key(old.slides[i])]
+
+
+def edit_note(old_text, new_text, ids):
+    """What to tell the designer when a script was edited: which slides, and what the narration used to say."""
+    if not ids: return ""
+    old, new = script.parse(old_text), script.parse(new_text)
+    lines = [f"The script was edited, so update the design of {', '.join(ids)} to match the new narration and on-screen text. "
+             "Keep the same look and feel. Keep everything the author's on-screen description still asks for, even if the narration "
+             "no longer says it aloud (it can appear with the nearest sentence). Remove only what the edit removed."]
+    for sid in ids:
+        i = int(sid[1:]) - 1
+        if i < len(old.slides): lines.append(f"The previous narration of {sid}:\n" + "\n".join(f"  {k}: {t}" for k, t in enumerate(old.slides[i].say)))
+        else: lines.append(f"{sid} is a new slide: design it to match the other slides.")
+    return "\n".join(lines)
+
+
+@app.put("/api/projects/{pid}/script")
+def update_script(pid: str, body: ScriptIn):
+    """Save an edited script and bring the slides up to date, redesigning only the scenes that changed."""
+    p = projects.get(pid)
+    if not p: raise HTTPException(404)
+    parse_or_422(body.script, body.title, body.subtitle)
+    if body.script == p["script"]: return {"job": None, "changed": []}
+    old = p["script"]
+    ids = changed_slides(old, body.script) if p["versions"] else []
+    projects.set_script(pid, body.script)
+    if not p["versions"]: return {"job": None, "changed": []}
+    if ids and not config.api_key_status()["set"] and p["versions"][-1].get("mode") != "basic":
+        raise HTTPException(400, "Add your Anthropic API key in Settings to redesign the changed slides.")
+    last_mode = p["versions"][-1].get("mode", "design")
+    if last_mode == "basic":
+        return {"job": start_design(pid, mode="basic", note="Script edited"), "changed": ids}
+    return {"job": start_design(pid, only=ids or None, feedback=edit_note(old, body.script, ids),
+                                note=f"Script edited ({len(ids)} slide{'s' if len(ids) != 1 else ''} redesigned)"), "changed": ids}
+
+
+@app.post("/api/projects/{pid}/design")
+def design_project(pid: str, body: ScriptIn):
+    """Design every slide with Claude (used to upgrade a quick-layout module)."""
+    p = projects.get(pid)
+    if not p: raise HTTPException(404)
+    parse_or_422(body.script, body.title, body.subtitle)
+    if not config.api_key_status()["set"]: raise HTTPException(400, "Add your Anthropic API key in Settings first.")
+    if body.script != p["script"]: projects.set_script(pid, body.script)
+    return {"job": start_design(pid, note="Designed with Claude"), "changed": []}
+
+
+class RestoreIn(BaseModel):
+    version: int
+
+
+@app.post("/api/projects/{pid}/restore")
+def restore(pid: str, body: RestoreIn):
+    try: projects.restore(pid, body.version)
+    except ValueError as e: raise HTTPException(400, str(e))
+    return project_view(pid)
+
+
+@app.post("/api/projects/{pid}/to-video")
+def to_video(pid: str):
+    p = projects.get(pid)
+    if not p or not p["versions"]: raise HTTPException(404, "Design the slides first.")
+    page = (projects.folder(pid) / "module.html").read_bytes()
+    return register_upload(f"{p['title']}.html", page) | {"project": pid}
+
+
+@app.get("/api/settings/glossary")
+def get_glossary(): return config.glossary()
+
+
+@app.put("/api/settings/glossary")
+def put_glossary(changes: dict): return config.set_glossary(changes)
 
 
 # ---------------------------------------------------------------- main

@@ -16,14 +16,19 @@ esc = html.escape
 def slug(name): return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "colour"
 
 
-def palette_vars(brand):
-    """--c-<name>: one CSS variable per brand colour (e.g. --c-cyan-spot), for the slide designer."""
+def palette_names(brand):
+    """[(css name, colour)] for each brand colour; the name is what follows --c- in the CSS variable."""
     seen, out = set(), []
     for c in brand.get("palette", []):
         n = slug(re.sub(r"\(.*?\)", "", c["name"]))
         if n in seen: n = f"{n}-{c['hex'][1:].lower()}"
-        seen.add(n); out.append(f"--c-{n}:{c['hex']};")
-    return "".join(out)
+        seen.add(n); out.append((n, c))
+    return out
+
+
+def palette_vars(brand):
+    """--c-<name>: one CSS variable per brand colour (e.g. --c-cyan-spot), for the slide designer."""
+    return "".join(f"--c-{n}:{c['hex']};" for n, c in palette_names(brand))
 
 
 def scene_ids(module):
@@ -83,9 +88,9 @@ html,body{{height:100%;background:#000;overflow:hidden}}
 [data-c]{{opacity:0;transform:translateY(12px);transition:opacity .7s ease var(--d,0s), transform .7s cubic-bezier(.2,.7,.2,1) var(--d,0s)}}
 [data-c].on{{opacity:1;transform:none}}
 h1,h2,h3{{font-family:var(--hfont);font-weight:600;letter-spacing:-.02em;line-height:1.1}}
-.slide-foot{{position:absolute;left:80px;right:80px;bottom:36px;height:24px;display:flex;align-items:center;justify-content:space-between;
+.slide-foot{{position:absolute;left:80px;right:80px;bottom:30px;height:32px;display:flex;align-items:center;justify-content:space-between;
   font:500 13px var(--bfont);color:var(--faint);letter-spacing:.02em}}
-.slide-foot img{{height:26px;width:auto;display:block}}
+.slide-foot img{{height:32px;width:auto;display:block}}
 .dots{{display:flex;gap:6px}} .dots i{{width:6px;height:6px;border-radius:50%;background:var(--line)}} .dots i.on{{background:var(--accent)}}
 
 /* design kit: building blocks for slide designs (all sizes come from the type scale) */
@@ -181,9 +186,9 @@ PLAYER_JS = """
   var cap = document.querySelector('#bar .cap'), count = document.querySelector('#bar .count'), play = document.getElementById('play');
   function norm(w){ return w.toLowerCase().replace(/[^a-z0-9]+/g, ''); }
   function cueDelay(e, text){            // estimate: ~0.4 s per word before the cued word (the video uses the voice's real timings)
-    var cue = (e.getAttribute('data-cue') || '').split(/\s+/).map(norm).filter(Boolean);
+    var cue = (e.getAttribute('data-cue') || '').split(/\\s+/).map(norm).filter(Boolean);
     if (!cue.length) return 0;
-    var words = text.split(/\s+/).map(norm);
+    var words = text.split(/\\s+/).map(norm);
     for (var i = 0; i + cue.length <= words.length; i++)
       if (cue.every(function(c, k){ return words[i + k] === c; })) return Math.max(0, i * 0.4 - 0.08);
     return 0;
@@ -280,29 +285,47 @@ def _contains(sentence, phrase):
     return any(words[i:i + len(cue)] == cue for i in range(len(words) - len(cue) + 1))
 
 
-def check(html_text, module):
-    """Problems that would make the module unusable for video; empty when it's fine."""
+class _Reveals(__import__("html.parser", fromlist=["HTMLParser"]).HTMLParser):
+    """Collects, per slide, every element's data-c / data-cue (any quoting style)."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True); self.slides, self.current = {}, None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "section" and a.get("id"): self.current = a["id"]; self.slides[self.current] = []
+        elif self.current and "data-c" in a: self.slides[self.current].append((a["data-c"], a.get("data-cue")))
+
+    def handle_endtag(self, tag):
+        if tag == "section": self.current = None
+
+
+def check_detailed(html_text, module):
+    """Problems that would make the module unusable for video, as [(slide id or "", message)]; empty when fine."""
     from html2mp4.cli import load_scenes, ConversionError
-    problems = []
     try:
         scenes = load_scenes(html_text)
     except ConversionError as e:
-        return [str(e)]
+        return [("", str(e))]
+    problems = []
     expected = ([module.intro] if module.intro else []) + [s.say for s in module.slides]
     if [s["chunks"] for s in scenes] != expected:
-        problems.append("The narration in the page doesn't match the script.")
+        problems.append(("", "The narration in the page doesn't match the script."))
+    parser = _Reveals(); parser.feed(html_text)
     for sid, chunks in zip(scene_ids(module), expected):
-        sec = re.search(rf'<section[^>]*\bid="{sid}"[^>]*>(.*?)</section>', html_text, re.S)
-        if not sec: problems.append(f"Slide {sid} is missing."); continue
-        used = {int(x) for x in re.findall(r'data-c="(\d+)"', sec.group(1))}
-        bad = sorted(c for c in used if c >= len(chunks))
-        if bad: problems.append(f"Slide {sid} reveals content on narration step {bad[0] + 1}, but it only has {len(chunks)}.")
-        if 0 not in used: problems.append(f"Slide {sid} shows nothing with its first sentence.")
-        for m in re.finditer(r'<[^>]*\bdata-c="(\d+)"[^>]*\bdata-cue="([^"]*)"|<[^>]*\bdata-cue="([^"]*)"[^>]*\bdata-c="(\d+)"', sec.group(1)):
-            c = int(m.group(1) or m.group(4)); cue = html.unescape(m.group(2) or m.group(3))
-            if c < len(chunks) and _cue_words(cue) and not _contains(chunks[c], cue):
-                problems.append(f"Slide {sid}: the cue “{cue}” isn't in narration step {c + 1}.")
+        reveals = parser.slides.get(sid)
+        if reveals is None: problems.append((sid, f"Slide {sid} is missing.")); continue
+        steps = {int(c) for c, _ in reveals if str(c).isdigit()}
+        bad = sorted(c for c in steps if c >= len(chunks))
+        if bad: problems.append((sid, f"Slide {sid} reveals content on narration step {bad[0]}, but it only has steps 0 to {len(chunks) - 1}."))
+        if 0 not in steps: problems.append((sid, f"Slide {sid} shows nothing with its first sentence (step 0): the heading needs data-c=\"0\"."))
+        for c, cue in reveals:
+            if cue and str(c).isdigit() and int(c) < len(chunks) and _cue_words(cue) and not _contains(chunks[int(c)], cue):
+                problems.append((sid, f"Slide {sid}: the cue “{cue}” isn't in narration step {c}; copy the words exactly from that sentence."))
     return problems
+
+
+def check(html_text, module):
+    return [m for _, m in check_detailed(html_text, module)]
 
 
 def main():

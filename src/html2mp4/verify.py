@@ -123,13 +123,22 @@ class Issue:
     def to_dict(self): return dataclasses.asdict(self)
 
 
-def words_of(text): return [w for w in re.findall(r"[a-z0-9]+", html.unescape(text).lower()) if len(w) > 2]
+def words_of(text):
+    """Words worth comparing: 3+ letters, not contractions (don't, we're)."""
+    return [w for w in re.findall(r"[a-z0-9']+", html.unescape(text).lower().replace("’", "'")) if len(w) > 2 and "'" not in w]
+
+
+def stem(word):
+    """A crude stem, so "looks"/"looking"/"looked" match "look" (enough for spotting invented words, not for language)."""
+    for suffix in ("ingly", "edly", "ing", "ies", "es", "ed", "ly", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3: return word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+    return word
 
 
 def vocabulary(module, extra=()):
     texts = [module.title, module.subtitle, *module.intro, *extra]
     for s in module.slides: texts += [s.title, s.screen, s.note, *s.say, *s.show]
-    return set(words_of(" ".join(texts)))
+    return {stem(w) for w in words_of(" ".join(texts))}
 
 
 def static_issues(slide_id, inner_html, css, banned=()):
@@ -186,7 +195,7 @@ def inspect(page_html, module, banned=(), allowed_extra=(), shots=True):
                         if last: shot_map[(sid, "last")] = (ci + 1, jpeg)
                     # words that appear on screen but nowhere in the script (a hint of invented content)
                     for t in m["texts"]:
-                        odd = [w for w in words_of(t) if w not in vocab and w not in STOPWORDS and not w.isdigit()]
+                        odd = [w for w in words_of(t) if stem(w) not in vocab and w not in STOPWORDS and not w.isdigit()]
                         if odd:
                             key = (sid, "invented", t)
                             if key not in found:

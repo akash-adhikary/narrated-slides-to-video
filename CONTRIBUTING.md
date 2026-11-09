@@ -27,9 +27,19 @@ cache and video folder.
 ```
 src/html2mp4/
   cli.py          conversion pipeline and the html2mp4 command
-  studio.py       Studio server (FastAPI): uploads, job lanes, cancellation, previews
-  studio.html     Studio front end (single file, no build step)
+  studio.py       Studio server (FastAPI): uploads, job lanes, cancellation, previews, the Write page API
   music.py        music bed synthesis and the html2mp4-music command
+  script.py       script formats and the parser
+  compose.py      assembles a module (stage, theme, narration, review player) and the quick layout
+  design.py       designs slides with Claude, then checks and fixes them
+  verify.py       renders every step of every slide and measures it
+  brandkit.py     reads brand folders, PDFs, logos, fonts and modules into a proposal
+  review.py       script suggestions
+  projects.py     saved modules and their versions
+  config.py       settings: API key, brand kit, glossary
+  ai.py           every call to Claude, in one place
+  web/            the Studio front end (index.html, app.css, one script per page)
+tests/            pytest suite
 examples/         a minimal module
 docs/             user and architecture documentation
 setup.sh          one-step installer
@@ -45,15 +55,21 @@ studio.sh         Studio launcher (also used by the .command files)
   [Fidelity](docs/how-it-works.md#fidelity) section.
 - **Keep the Studio simple.** Its users aren't technical. Prefer a sensible default over a new option, and write UI
   text in plain language.
-- **Everything stays local.** Don't add network calls, telemetry or cloud services.
+- **Keep it local.** Making a video must stay fully offline. The only network use besides setup is Anthropic's API for
+  designing slides, checking scripts and reading brand guidelines, kept in `ai.py`. No telemetry or other services.
 - **Match the surrounding code.** Follow its style and comment density. The front end is plain HTML, CSS and
   JavaScript, with no framework or build step.
 - **Bump `RENDER_VERSION`** in `cli.py` whenever a change affects rendered frames, so caches don't serve stale pictures.
 
 ## Verifying a change
 
-The test suite is still to come. Until it exists, verify changes by hand and describe what you checked in the pull
-request.
+Run the automated tests first. They use a stand-in for Claude, so they're free and need no API key:
+
+```bash
+pip install -e ".[dev]" && python -m pytest
+```
+
+Then verify by hand and describe what you checked in the pull request.
 
 1. **Command line.** Convert `examples/example.html` and a real module. Check the output with `ffprobe`: the right
    resolution, video, audio and subtitle streams, and the expected duration.

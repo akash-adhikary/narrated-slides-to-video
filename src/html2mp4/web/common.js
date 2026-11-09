@@ -8,10 +8,10 @@ async function api(url, opts){ const r = await fetch(url, opts); const b = await
 addEventListener("scroll", () => $("#top").classList.toggle("scrolled", scrollY > 8), {passive:true});
 
 /* ---------- pages: #create, #settings (and #library, which lives on the Create page) ---------- */
-const PAGES = ["create", "settings"];
+const PAGES = ["write", "create", "settings"];
 const pageHooks = {};                       // page name -> function run when the page is shown
 function route(){
-  const h = location.hash.slice(1) || "create";
+  const h = location.hash.slice(1) || "write";
   const page = PAGES.includes(h) ? h : "create";
   document.querySelectorAll(".page").forEach(p => p.hidden = p.id !== `page-${page}`);
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.page === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));

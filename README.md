@@ -5,7 +5,8 @@
 [![Platform: macOS (Apple silicon)](https://img.shields.io/badge/platform-macOS%20%28Apple%20silicon%29-lightgrey.svg)](#requirements)
 
 Narrated Slides Studio turns an HTML slide module into a finished training video: a natural voiceover, background
-music that steps back when the narrator speaks, and captions. Everything runs on your own computer.
+music that steps back when the narrator speaks, and captions. It can also design the slides from a script. Making videos
+runs entirely on your own computer; designing slides uses Anthropic's API.
 
 It was built for teams that author e-learning modules as animated HTML and need to publish them to a learning
 platform as MP4. Screen-recording a browser is slow and the result drifts out of sync. This tool renders the page frame
@@ -15,14 +16,16 @@ by frame instead, so every animation lands on the sentence that triggers it and 
 
 ## Features
 
-- **A web app for non-technical users.** Drop in a module, pick a voice and music, listen to a 10-second preview, then create the video.
+- **From a script to slides.** Paste a script and Claude designs branded slides, a checker renders every step to catch overlaps, overflow and off-scale type, and you refine the result in plain language, with versions you can return to.
+- **Your brand.** Import a brand folder or guidelines PDF and the Studio picks up the colours, typefaces, logos and design rules.
+- **A web app for non-technical users.** Pick a voice and music, listen to a 10-second preview, then create the video.
 - **Neural voiceover, generated locally** with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M): six curated US and UK voices and three speaking paces.
-- **Faithful to the source.** The page's own HTML, CSS and animations are used unchanged. See [Fidelity](docs/how-it-works.md#fidelity).
+- **Faithful to the source.** The page's own HTML, CSS and animations are used unchanged, and things appear on the word that names them. See [Fidelity](docs/how-it-works.md#fidelity).
 - **Sharp, small files.** 1440p or 1080p H.264, about 3 MB per minute, and they play in any browser or LMS.
 - **Broadcast-style sound.** Loudness is normalised to −16 LUFS, and the music dips automatically under speech.
 - **Captions.** A switchable caption track inside the MP4, plus `.srt` and `.vtt` files for your LMS.
 - **Royalty-free music.** Three built-in music beds are synthesised in code, so there are no licences to track. You can also bring your own track.
-- **Private by design.** No accounts, no uploads, no per-video cost.
+- **Private where it counts.** Voice, music and video are made on your computer, with no accounts and no per-video cost. Only the design step sends text (your script and brand rules) to Anthropic, and you can skip it by using HTML you already have.
 
 ## Quick start
 
@@ -88,6 +91,8 @@ the format in full.
 
 ## How it works
 
+A script is first turned into a module: Claude designs each slide, and every narration step is rendered and checked. The module is then turned into a video.
+
 The narration is voiced sentence by sentence and laid out on a timeline. Headless Chromium then loads the module, pauses
 every CSS transition, and seeks it to the exact time of each frame. Frames are rendered in parallel at the target
 resolution and encoded with x264. The voice and music are mixed, ducked and loudness-normalised, and FFmpeg combines
@@ -104,13 +109,16 @@ The [architecture notes](docs/how-it-works.md) describe each stage and what the 
 | Linux | Expected to work with `./setup.sh`, but untested |
 | Windows | Not packaged yet |
 
+Designing slides needs an [Anthropic API key](https://console.anthropic.com/settings/keys) (about $1 per module). Making videos does not.
+
 Disk space: about 3 GB for Python, the voice model and Chromium. A 2–3 minute module takes 5–8 minutes to create at
 1440p on an M-series laptop.
 
 ## Documentation
 
 - [Getting started](docs/getting-started.md): installation and first video, for non-technical users
-- [Authoring modules](docs/authoring.md): the module format and narration tips
+- [From script to slides](docs/scripts.md): script formats, brand kit, the checker, and asking for changes
+- [Authoring modules](docs/authoring.md): the module format, for writing or editing HTML by hand
 - [CLI reference](docs/cli.md): commands, options and environment variables
 - [How it works](docs/how-it-works.md): pipeline, audio, encoding, Studio, and fidelity to the source
 - [Troubleshooting](docs/troubleshooting.md)

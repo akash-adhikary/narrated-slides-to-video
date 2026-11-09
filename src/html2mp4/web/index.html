@@ -14,6 +14,7 @@
     <div class="mark"><svg viewBox="0 0 10 12"><path d="M0 0v12l10-6z"/></svg></div>
     <div class="brand">Narrated Slides <span>Studio</span></div>
     <nav class="tabs" aria-label="Sections">
+      <a href="#write" data-page="write">Write</a>
       <a href="#create" data-page="create">Create video</a>
       <a href="#settings" data-page="settings">Settings</a>
     </nav>
@@ -22,7 +23,90 @@
 </header>
 
 <main>
-<div class="page" id="page-create">
+<div class="page" id="page-write" hidden>
+  <section class="hero">
+    <div class="eyebrow"><i></i>Step 1 of 2</div>
+    <h1>Write your script. <em>Get your slides.</em></h1>
+    <p class="lede">Paste the narration and what should appear on screen. Claude designs branded slides, checks every one, and you refine them until they're right.</p>
+  </section>
+
+  <section class="card" id="cardScript" aria-labelledby="hScript">
+    <div class="card-h"><span class="num">1</span><h2 id="hScript">Your script</h2><p id="wStats"></p></div>
+    <div class="script-tools">
+      <button class="link" type="button" id="wExample">Insert an example</button>
+      <label class="link" for="wFile">Open a text file</label><input type="file" id="wFile" accept=".txt,.md,text/plain" hidden>
+      <button class="link" type="button" id="wHelp">How to write it</button>
+      <button class="link" type="button" id="wNew" hidden>Start a new module</button>
+    </div>
+    <div class="help" id="wHelpBox" hidden>
+      <p>Write it the way you'd brief a presenter. Either format works:</p>
+      <div class="help-cols">
+        <pre>Scene 1: The opening (0:00 to 0:30)
+On screen: “Every hire shapes the team.”
+Think back to the best colleague you've
+worked with. What made them the best?
+
+Scene 2: What we're looking for
+On screen: four labels appear in turn
+Strong candidates share several traits…</pre>
+        <pre>Title: Giving Feedback That Lands
+Subtitle: Manager Essentials
+
+## Why feedback matters
+Show: Builds trust · Speeds up growth
+Say: Feedback is how teams get better.
+Say: Done well, it builds trust.
+Note: three cards, left to right</pre>
+      </div>
+      <p class="fine">The first line is the title. Each narration sentence can make something appear on screen. Your narration is never reworded.</p>
+    </div>
+    <textarea id="wScript" class="script-area" spellcheck="true" placeholder="Paste your script here…" aria-label="Script"></textarea>
+    <div class="script-status" id="wStatus" aria-live="polite"></div>
+    <div class="w-actions">
+      <button class="btn-2" type="button" id="wReview"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>Check my script</button>
+      <button class="btn" type="button" id="wDesign"><svg viewBox="0 0 16 16"><path d="M8 1l1.6 4.4L14 7l-4.4 1.6L8 13l-1.6-4.4L2 7l4.4-1.6z"/></svg><span id="wDesignText">Design slides</span></button>
+    </div>
+    <div class="w-alt"><button class="text-btn" type="button" id="wBasic">Or use the quick layout, with no AI</button><span id="wCostHint"></span></div>
+    <div id="wSuggest"></div>
+  </section>
+
+  <section class="card" id="cardJob" hidden aria-live="polite">
+    <div class="prog show">
+      <div class="prog-top"><div><div class="prog-title" id="jobTitle">Designing your slides</div><div class="prog-label" id="jobLabel">Getting ready</div></div>
+        <div class="pct" id="jobPct">0<small>%</small></div></div>
+      <div class="bar"><i id="jobBar"></i></div>
+      <div class="prog-foot"><span id="jobEta"></span><span>You can leave this page. It keeps working.</span></div>
+    </div>
+  </section>
+
+  <section class="card" id="cardReview" hidden aria-labelledby="hReview">
+    <div class="card-h"><span class="num">2</span><h2 id="hReview">Review your slides</h2><p id="rvMeta"></p></div>
+    <div class="rv-grid">
+      <div class="rv-stage">
+        <iframe id="rvFrame" title="Slide preview" src="about:blank"></iframe>
+        <div class="rv-bar"><select id="rvVersion" aria-label="Version"></select><button class="link" type="button" id="rvRestore" hidden>Restore this version</button>
+          <small>Use ‹ › or the slide list to step through. The video follows exactly this.</small></div>
+      </div>
+      <aside class="rv-side"><h4>Slides</h4><ol id="rvSlides"></ol></aside>
+    </div>
+    <div id="rvIssues"></div>
+    <div class="feedback">
+      <h4>Ask for a change</h4>
+      <div class="fb-row"><select id="fbScope" aria-label="Which slides"></select>
+        <textarea id="fbText" rows="2" placeholder="e.g. Make the cards on this slide larger.  Or give a time: “at 2:51 the boxes overlap”."></textarea></div>
+      <div class="fb-actions"><small id="fbHint">Edits to the script above update only the slides that changed.</small>
+        <button class="btn-2" type="button" id="fbGo">Apply change</button></div>
+    </div>
+    <div class="rv-actions"><span id="rvCost"></span><button class="btn" type="button" id="rvUse">Use these slides to make the video<svg viewBox="0 0 16 16"><path d="M3 8h9m-3.5-4L12.5 8 8.5 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+  </section>
+
+  <section class="lib" id="modules" hidden>
+    <div class="lib-h"><h2>Your modules</h2><span>Saved in your Narrated Videos folder</span></div>
+    <div class="mods" id="modList"></div>
+  </section>
+</div>
+
+<div class="page" id="page-create" hidden>
   <section class="hero">
     <div class="eyebrow"><i></i>Runs privately on this computer</div>
     <h1>Turn your slides into a <em>narrated</em> video.</h1>
@@ -163,6 +247,20 @@
       When you design slides from a script, the script text is sent to Anthropic. Making videos stays entirely on this computer.</p>
   </section>
 
+  <section class="card" aria-labelledby="hGloss">
+    <div class="card-h"><h2 id="hGloss">Words and pronunciation</h2><p>Applies to every module</p></div>
+    <div class="gloss-grid">
+      <div class="field"><label>Pronunciation</label>
+        <div id="pronList" class="pron-list"></div>
+        <div class="pron-add"><input type="text" id="pronWritten" placeholder="Written, e.g. R&amp;D" aria-label="Written as"><span>is said</span><input type="text" id="pronSaid" placeholder="Spoken, e.g. R and D" aria-label="Spoken as">
+          <button class="link" type="button" id="pronAdd">Add</button></div>
+        <small>The voice says the spoken form. Captions and slides keep the written form.</small></div>
+      <div class="field"><label>Banned terms</label>
+        <textarea id="glBanned" rows="4" placeholder="One per line, e.g. an old programme name"></textarea>
+        <small>Designs are checked for these and fixed if they appear.</small></div>
+    </div>
+  </section>
+
   <section class="card" aria-labelledby="hBrand">
     <div class="card-h"><h2 id="hBrand">Brand kit</h2><p>Applied to every module designed from a script</p></div>
 
@@ -238,6 +336,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/create.js"></script>
+<script src="/static/write.js"></script>
 <script src="/static/settings.js"></script>
 </body>
 </html>

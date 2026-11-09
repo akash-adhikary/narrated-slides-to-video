@@ -70,6 +70,10 @@ earlier slides stay `on`.
 <div class="card" data-c="1" data-d="0.6">Sentences</div>  <!-- with the second, 0.6 s later -->
 ```
 
+`data-cue="word or phrase"` makes the element appear when the narrator says those words in its sentence, using the
+voice's real word timings in the video (the in-browser player estimates it). The words must appear in the sentence.
+`data-d` then adds a delay on top of the cue. Without `data-cue`, `data-d` is a plain delay in seconds from the start of the sentence.
+
 `data-d` adds a delay in seconds. It's exposed to CSS as the custom property `--d`, so a typical rule is:
 
 ```css
@@ -89,6 +93,13 @@ slide until it finishes. Long delays therefore lengthen the video rather than be
 
 A module may include its own in-browser player: a control bar with the id `bar` and a start overlay with the id
 `start`. Both are hidden in the video. Anything else on the stage appears exactly as it does in the browser.
+
+## Modules designed by the Studio
+
+Modules made on the Write page follow extra conventions, which you can reuse when writing by hand: font sizes come from a
+fixed scale (`--fs-display` 96, `--fs-title` 64, `--fs-heading` 44, `--fs-lead` 28, `--fs-body` 22, `--fs-small` 16 px),
+colours from CSS variables (`--bg`, `--text`, `--accent`, `--c-<brand colour>`), and every slide's CSS is scoped to its id.
+The review player (`#bar`) is hidden in the video. See [From script to slides](scripts.md).
 
 ## Writing narration that sounds right
 

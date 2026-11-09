@@ -196,3 +196,26 @@ pageHooks.settings = async () => {
     fillBrand(s.brand); previewBrand();
   }catch(err){ toast(err.message); }
 };
+
+/* ---------- glossary ---------- */
+const gloss = {pron: {}, timer: null};
+function renderPron(){
+  $("#pronList").innerHTML = Object.entries(gloss.pron).map(([w, s]) => `<div><span><b>${esc(w)}</b> is said <b>${esc(s)}</b></span><button type="button" data-w="${esc(w)}" aria-label="Remove">Remove</button></div>`).join("");
+}
+async function saveGloss(){
+  const g = await api("/api/settings/glossary", {method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({pronunciations: gloss.pron, banned: $("#glBanned").value.split("\n")})});
+  gloss.pron = g.pronunciations; renderPron();
+}
+$("#pronAdd").addEventListener("click", async () => {
+  const w = $("#pronWritten").value.trim(), s = $("#pronSaid").value.trim();
+  if(!w || !s){ toast("Fill in both boxes"); return; }
+  gloss.pron[w] = s; $("#pronWritten").value = $("#pronSaid").value = ""; await saveGloss(); toast("Saved");
+});
+$("#pronList").addEventListener("click", async e => { const b = e.target.closest("button"); if(b){ delete gloss.pron[b.dataset.w]; await saveGloss(); } });
+$("#glBanned").addEventListener("input", () => { clearTimeout(gloss.timer); gloss.timer = setTimeout(saveGloss, 600); });
+const loadSettings = pageHooks.settings;
+pageHooks.settings = async () => {
+  await loadSettings();
+  const g = await api("/api/settings/glossary"); gloss.pron = g.pronunciations; renderPron(); $("#glBanned").value = (g.banned || []).join("\n");
+};

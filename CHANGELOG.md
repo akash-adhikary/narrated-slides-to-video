@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-09
+
+### Added
+- **Write page**: paste a script and Claude designs the slides. Scripts can use `Scene N: Title` / `On screen:` / narration
+  paragraphs, or `Title:` / `## Slide` / `Show:` / `Say:`. See `docs/scripts.md`.
+- **Layout checker**: every narration step of every slide is rendered and measured for text that doesn't fit its box,
+  overlaps, content outside the margins, font sizes outside a fixed type scale, low contrast, banned terms and script
+  errors. Problems are fixed automatically, with screenshots, in up to two rounds, followed by a design review.
+- **Cue-timed reveals**: `data-cue="word"` makes an element appear when the narrator says it, using the voice's word timings.
+- **Revisions and versions**: ask for changes in plain language for the module, one slide, or a moment in the video
+  ("at 2:51"); editing the script redesigns only the changed slides; every result is a version that can be restored.
+- **Script suggestions** for typos, unclear lines, risky wording and pronunciation, accepted one by one.
+- **Brand kit import** (guidelines PDF, logos, font files, an existing module), a **glossary** with pronunciations and
+  banned terms, and a **Settings** page for the Anthropic API key.
+- `html2mp4-script` command, a project store under `~/Downloads/Narrated Videos/Modules`, and a pytest suite.
+
+### Changed
+- The Studio opens on the Write page. The front end is split into separate files.
+- Pronunciations change what the voice says without changing captions or slides.
+
 ## [0.3.0] - 2026-10-13
 
 ### Added
@@ -48,7 +68,8 @@ All notable changes to this project are documented here. The format follows
 - Three synthesised, royalty-free music beds.
 - Example module.
 
-[Unreleased]: https://github.com/akash-adhikary/narrated-slides-to-video/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/akash-adhikary/narrated-slides-to-video/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/akash-adhikary/narrated-slides-to-video/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/akash-adhikary/narrated-slides-to-video/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/akash-adhikary/narrated-slides-to-video/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/akash-adhikary/narrated-slides-to-video/releases/tag/v0.1.0

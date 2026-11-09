@@ -97,6 +97,51 @@ Job engine requirements (learned the hard way):
   /api/active. Waiting jobs say what they're waiting for. Interrupted jobs are marked failed on restart.
 - `[hidden]{display:none!important}` (component display rules otherwise override `hidden`).
 
+## Write page: script -> slides (module HTML)
+Sits in front of everything above: the Studio opens on a "Write" tab (then "Create video" and "Settings"). Making videos stays
+local; this part calls Claude (Claude Opus 5.5, `claude-opus-5-5`, via the official `anthropic` SDK, streaming, structured
+output with `output_config.format`, `fallbacks:"default"` + beta `server-side-fallback-2026-07-01`, system prompt cached).
+All Claude calls live in one `ai.py` with plain-language errors; a missing key is a friendly message, never a traceback.
+- Script formats (auto-detected): (a) "Scene N: Title (0:00 to 0:30)" / "On screen: ..." / narration paragraphs, first line = title;
+  (b) Title/Subtitle/`## Slide`/Show/Say/Note. Split paragraphs into sentences without splitting inside curly or straight
+  quotes, after abbreviations, or after "St." inside a word (match whole words: "honest." is not "St."). Narration is copied
+  verbatim; only visuals come from Claude. Errors name the line.
+- `compose.py` generates everything that must be exact in code: stage, theme (CSS variables incl. one `--c-<name>` per brand
+  colour and a fixed type scale 96/64/44/28/22/16), narration list (JSON, `</` escaped), footer+logo, a review player, and a
+  no-AI "quick layout". Brand: dark/light roles, fonts, two logo slots (on dark / on light), design rules, glossary.
+  Kit fonts are embedded as `@font-face`.
+- Claude returns per slide `{id, layout, summary, html, css}`. Reject (statically) scripts, event handlers, outside links,
+  images, `url()`, `@import`, animation/keyframes, `position:fixed`, and any selector not starting with `#<slide id>`.
+  Prompt rules that mattered: reveal with `data-c` (+ `data-cue="exact words"` for items named in turn); flex/grid not
+  absolute positions; boxes sized to their text with 16px padding; 24px gaps; no connector lines, arrows or hubs; one visual
+  language across slides; only the fixed font sizes; colours only via variables; use given on-screen text verbatim; never
+  invent facts; apply brand rules; headline case via CSS.
+- Checker (`verify.py`, Playwright): for every narration step of every slide, jump to the fully revealed state and measure
+  in-page: text rect vs the nearest ancestor with a border/background (spills), SVG text crossing shape edges, text/box
+  overlaps (`data-overlay` opts out), safe-area bounds (24px margins, above the footer), computed font size x CTM scale vs
+  the scale, contrast vs nearest solid background (skip gradient/`background-clip:text`), words not in the script (stem
+  inflections; ignore contractions) as a warning, banned terms, page errors. Parse HTML with a real parser, not regexes:
+  Claude writes single-quoted attributes. Problems go back with the first failing step's screenshot (max 2 fix rounds),
+  then a design review of final-state screenshots (`must` = fix, `nice` = note; tell it to ignore the footer; screenshots
+  are shrunk, so don't judge small sizes from them). Report only what is true: never claim "checked" unless it was.
+- Cue timing: the TTS reports word start times (Kokoro tokens); save them per sentence (relative to the trimmed clip), and in
+  the renderer set each cued element's `--d` from them before measuring spans and rendering. The review player estimates it.
+- Pronunciation glossary changes the spoken text only (captions/slides keep the written form). Banned terms are enforced.
+- Brand kit import: drop a folder/zip, PDF, logos, fonts, or a module. Read fonts (family, variable weight axis), classify
+  logos (light/dark, primary/icon/stacked), read modules (palette, fonts, logos, compact style reference), have Claude read the
+  PDF into palette/roles/fonts/rules (keep only hex codes that appear in the PDF; heuristics without a key). Review before
+  applying; settings in `~/.config/html2mp4` (0600). Pages and scripts must revalidate (`Cache-Control: no-cache`).
+- Projects on disk (`Modules/<name>/`: project.json, script.txt, module.html, versions/vN.html+json): every design, revision
+  and restore is a new version. Revisions take free text, scope (module or slide) and moments ("at 2:51" is mapped to a slide
+  from approximate start times). Editing the script redesigns only changed slides. Quick-layout projects upgrade with
+  "Design with Claude".
+- Write page UI: script box with live parse status, suggestions (typos/clarity/risky wording/pronunciation, accepted one
+  by one; quotes must exist in the script), design job with streamed progress ("planning the layouts", then "n of 6 done";
+  ~4-8 min, ~$1), review (preview iframe synced with a slide list, version select/restore, checker notes, feedback box),
+  "Use these slides to make the video" hands the module to the Create page. Jobs survive reloads.
+- Tests (pytest, no network): parser, composer, checker (clean and deliberately broken slides), brand kit with synthetic
+  assets, a fake Claude for the design/fix/review loop, projects, and the Studio API.
+
 ## Distribution
 - `setup.sh`: installs uv to ~/.local/bin if missing (no admin), `uv venv --python 3.11`, `uv pip install -e .`,
   `playwright install chromium`, pre-downloads the voice model and music beds. Idempotent.
@@ -116,4 +161,6 @@ Job engine requirements (learned the hard way):
 - Studio tested end to end in a browser: upload, voice/music previews, 10 s preview, create, cancel, reload
   mid-render, and a preview during a full render that completes in under ~1 minute.
 - A fresh clone installs with Homebrew removed from PATH and converts the example.
+- The Write page turns a real script (with the Scene/On screen format) into slides that pass the checker, in the brand,
+  and the resulting module converts to a video in which items appear on the words that name them.
 ````

@@ -24,17 +24,24 @@ def client(timeout=600):
         raise AIError("No Anthropic API key is set. Add one in Settings.")
 
 
-def structured(system, content, schema, effort="medium", max_tokens=32000):
-    """One request whose answer must match `schema`. Returns (data, usage)."""
+def structured(system, content, schema, effort="medium", max_tokens=32000, on_text=None):
+    """One request whose answer must match `schema`. Returns (data, usage). `on_text(text_so_far)` is called as the answer streams in."""
     c = client()
     try:
         with c.beta.messages.stream(
-            model=config.DESIGN_MODEL, max_tokens=max_tokens, system=system,
+            model=config.DESIGN_MODEL, max_tokens=max_tokens,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if isinstance(system, str) else system,
             messages=[{"role": "user", "content": content}],
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             betas=[FALLBACK_BETA], fallbacks="default",
         ) as stream:
+            so_far = ""
+            for event in stream:
+                if on_text and event.type == "text":
+                    so_far += event.text; on_text(so_far)
             msg = stream.get_final_message()
+    except TypeError:          # the SDK found no credentials anywhere
+        raise AIError("No Anthropic API key is set. Add one in Settings.")
     except anthropic.AuthenticationError:
         raise AIError("Anthropic didn't accept the API key. Check it in Settings.")
     except anthropic.PermissionDeniedError:
@@ -57,5 +64,6 @@ def structured(system, content, schema, effort="medium", max_tokens=32000):
 
 
 def cost(usage):
-    """Approximate US$ for one call at Claude Opus 5.5 list prices ($4 / $20 per million tokens)."""
-    return (usage.input_tokens * 4 + usage.output_tokens * 20) / 1e6
+    """Approximate US$ for one call at Claude Opus 5.5 list prices ($4 in / $20 out per million tokens; cache reads $0.20)."""
+    return (usage.input_tokens * 4 + (getattr(usage, "cache_creation_input_tokens", 0) or 0) * 5
+            + (getattr(usage, "cache_read_input_tokens", 0) or 0) * 0.2 + usage.output_tokens * 20) / 1e6

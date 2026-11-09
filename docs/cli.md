@@ -11,6 +11,7 @@ source .venv/bin/activate
 | `html2mp4` | Convert a module to MP4 |
 | `html2mp4-studio` | Start the Studio web app |
 | `html2mp4-music` | Write the built-in music beds to a folder |
+| `html2mp4-script` | Turn a script into a module (quick layout, no AI) |
 
 ## `html2mp4`
 
@@ -70,6 +71,16 @@ gliding down in 0.3 s and back up in 0.9 s. It fades in over the first 2 seconds
 | `balanced` | 12 dB | 6 dB |
 | `present` | 8 dB | 2 dB |
 
+## `html2mp4-script`
+
+```
+html2mp4-script SCRIPT.txt [-o OUT.html]
+```
+
+Parses a script ([formats](scripts.md#writing-a-script)) and writes a module using the quick layout, in your brand kit's
+colours, fonts and logo. It is checked for a matching narration list before it's written. Designing with Claude is done
+in the Studio. Convert the result with `html2mp4`.
+
 ## `html2mp4-studio`
 
 ```
@@ -95,6 +106,8 @@ directory. Each is a 48-second seamless loop at 48 kHz, synthesised in code. The
 |---|---|---|
 | `HTML2MP4_CACHE` | `~/.cache/html2mp4` | Where narration clips, music beds, rendered pictures and Studio state are kept. Safe to delete. |
 | `HTML2MP4_OUTPUT` | `~/Downloads/Narrated Videos` | Where the Studio saves finished videos. |
+| `HTML2MP4_CONFIG` | `~/.config/html2mp4` | Settings: API key, brand kit, fonts, glossary. |
+| `HTML2MP4_MODULES` | `~/Downloads/Narrated Videos/Modules` | Where the Write page saves modules and their versions. |
 | `HTML2MP4_NO_BROWSER` | unset | If set, the Studio doesn't open a browser window on start. |
 
 ## Using it from Python
