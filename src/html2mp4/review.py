@@ -21,12 +21,17 @@ Kinds:
   that keeps the meaning.
 - risk: wording that could read as a promise, guarantee or commitment (about promotion, pay, titles, outcomes, growth),
   or that could create a legal, HR or fairness concern. `replacement` is a safer version that keeps the meaning.
-- pronounce: an abbreviation, acronym, symbol or unusual name a voice may say wrongly (for example "R&D", "DSA", "ThoughtSpot").
+- pronounce: an abbreviation, acronym, symbol or unusual name a voice may say wrongly (for example "R&D", "DSA", "SQL").
   `quote` is the term exactly as written; `replacement` is how it should be SPOKEN (for example "R and D", "D S A").
   Only include terms that are actually likely to be mispronounced.
 
 `quote` must be copied exactly from the script (a short phrase or one sentence), so it can be found and replaced.
-Never rewrite for style. If the script is fine, return an empty list."""
+Never rewrite for style. If the script is fine, return an empty list.
+
+Ignore the script's structure: the first line (the title), "Scene N:" headings with their times, and the "On screen:",
+"Show:", "Say:" and "Note:" labels are not narration. Review the narration and the on-screen text under them.
+For `pronounce`, include only acronyms, abbreviations, symbols and unusual names. Ordinary words and well-known company or
+product names are pronounced fine; leave them out."""
 
 
 def review(script_text):

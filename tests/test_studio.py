@@ -86,3 +86,12 @@ def test_script_edit_note_names_slides_and_old_narration():
     assert "update the design of s1" in note and "0: Feedback is how good teams get better." in note
     assert studio.edit_note(script.EXAMPLE, new, []) == ""
     assert "s4 is a new slide" in studio.edit_note(script.EXAMPLE, script.EXAMPLE + "\n## Extra\nSay: More.", ["s4"])
+
+
+def test_earlier_feedback_is_carried_into_later_changes():
+    p = {"feedback": [{"text": "remove the HR line", "scope": ["s6"]}, {"text": "use larger cards", "scope": "all"},
+                      {"text": "unrelated to s2", "scope": ["s3"]}, {"text": "the new request", "scope": ["s6"]}]}
+    note = studio.history_note(p, ["s6"], "the new request")
+    assert "remove the HR line (slides s6)" in note and "use larger cards" in note
+    assert "unrelated to s2" not in note and "the new request" not in note
+    assert studio.history_note({"feedback": []}, None, "x") == ""

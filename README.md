@@ -12,7 +12,13 @@ It was built for teams that author e-learning modules as animated HTML and need 
 platform as MP4. Screen-recording a browser is slow and the result drifts out of sync. This tool renders the page frame
 by frame instead, so every animation lands on the sentence that triggers it and the video looks the same as the page.
 
-![Narrated Slides Studio](docs/assets/studio.png)
+![Write page: a script becomes slides you can review and refine](docs/assets/write.png)
+
+*The Write page: a script becomes slides that are checked, previewed and refined.*
+
+![Create video page: voice, music, preview and render](docs/assets/studio.png)
+
+*The Create video page: choose a voice and music, preview 10 seconds, then render.*
 
 ## Features
 

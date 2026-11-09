@@ -485,6 +485,15 @@ def moment_note(m):
     return "Times in the feedback (like 2:51) refer to the finished video. Approximate slide start times: " + "; ".join(rows) + "."
 
 
+def history_note(p, only, current_feedback):
+    """Earlier requests that still apply to these slides, so a new change doesn't quietly undo them."""
+    entries = [f for f in p.get("feedback", []) if f["text"] != current_feedback]
+    keep = [f for f in entries if f["scope"] in ("all", [], None) or (isinstance(f["scope"], list) and (not only or any(x in only for x in f["scope"])))]
+    if not keep: return ""
+    return ("Earlier changes the author asked for. Keep them in effect unless the new feedback says otherwise:\n"
+            + "\n".join(f"- {f['text']}" + (f" (slides {', '.join(f['scope'])})" if isinstance(f["scope"], list) and f["scope"] else "") for f in keep[-8:]))
+
+
 def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
     """Design, revise or just re-check slides in the background, then save the result as a new version."""
     def progress(f, label): job.update(progress=round(f, 3), label=label)
@@ -504,7 +513,7 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
                 job.update(status="done", progress=1.0, label="Done", cost=0)
                 return
             res = design.design(m, brand, reference=ref, previous=prev, only=only, feedback=feedback, progress=progress,
-                                timing_note=moment_note(m) if feedback else "")
+                                timing_note=(moment_note(m) + "\n" + history_note(p, only, feedback)).strip() if feedback else "")
             problems = [i for i in res["issues"] if i.kind != "invented"] + [i for i in res["issues"] if i.kind == "invented"]
             projects.save_version(project_id, res["html"], res["slides"], note, cost=res["cost"], issues=problems)
             job.update(status="done", progress=1.0, label="Done", cost=round(res["cost"], 2))
