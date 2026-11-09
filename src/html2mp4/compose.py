@@ -8,7 +8,22 @@ import html, json, re
 from html2mp4 import __version__
 
 STAGE_W, STAGE_H = 1280, 720
+# The only font sizes (px) a slide may use, so every module looks uniform. Footer text is exempt.
+TYPE_SCALE = {"display": 96, "title": 64, "heading": 44, "lead": 28, "body": 22, "small": 16}
 esc = html.escape
+
+
+def slug(name): return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "colour"
+
+
+def palette_vars(brand):
+    """--c-<name>: one CSS variable per brand colour (e.g. --c-cyan-spot), for the slide designer."""
+    seen, out = set(), []
+    for c in brand.get("palette", []):
+        n = slug(re.sub(r"\(.*?\)", "", c["name"]))
+        if n in seen: n = f"{n}-{c['hex'][1:].lower()}"
+        seen.add(n); out.append(f"--c-{n}:{c['hex']};")
+    return "".join(out)
 
 
 def scene_ids(module):
@@ -54,6 +69,8 @@ def theme_css(brand):
   --line:color-mix(in srgb, var(--text) 16%, var(--bg)); --accent-soft:color-mix(in srgb, var(--accent) 18%, var(--bg));
   --hfont:"{brand['heading_font']}", system-ui, -apple-system, "Segoe UI", sans-serif;
   --bfont:"{brand['body_font']}", system-ui, -apple-system, "Segoe UI", sans-serif;
+  {"".join(f"--fs-{k}:{v}px;" for k, v in TYPE_SCALE.items())}
+  {palette_vars(brand)}
 }}
 *{{box-sizing:border-box;margin:0;padding:0}}
 html,body{{height:100%;background:#000;overflow:hidden}}
@@ -71,30 +88,46 @@ h1,h2,h3{{font-family:var(--hfont);font-weight:600;letter-spacing:-.02em;line-he
 .slide-foot img{{height:26px;width:auto;display:block}}
 .dots{{display:flex;gap:6px}} .dots i{{width:6px;height:6px;border-radius:50%;background:var(--line)}} .dots i.on{{background:var(--accent)}}
 
+/* design kit: building blocks for slide designs (all sizes come from the type scale) */
+.t-display{{font:500 var(--fs-display)/1 var(--hfont);letter-spacing:-.03em}}
+.t-title{{font:600 var(--fs-title)/1.08 var(--hfont);letter-spacing:-.025em}}
+.t-heading{{font:600 var(--fs-heading)/1.12 var(--hfont);letter-spacing:-.02em}}
+.t-lead{{font:500 var(--fs-lead)/1.25 var(--hfont);letter-spacing:-.01em}}
+.t-body{{font:400 var(--fs-body)/1.4 var(--bfont)}}
+.t-small{{font:500 var(--fs-small)/1.3 var(--bfont)}}
+.t-eyebrow{{font:600 var(--fs-small)/1.2 var(--bfont);letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}}
+.t-muted{{color:var(--muted)}}
+.stack{{display:flex;flex-direction:column;gap:24px}}
+.row{{display:flex;gap:24px;align-items:stretch}}
+.row > *{{flex:1;min-width:0}}
+.grid{{display:grid;gap:24px}}
+.card{{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:28px}}
+.pill{{display:inline-block;padding:6px 16px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font:600 var(--fs-small)/1.2 var(--bfont)}}
+
 /* title slide */
 .title-slide .slide-body{{display:flex;flex-direction:column;justify-content:center}}
-.title-slide .eyebrow{{font:600 15px var(--bfont);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:22px}}
-.title-slide h1{{font-size:68px;max-width:960px}}
+.title-slide .eyebrow{{font:600 var(--fs-small) var(--bfont);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:22px}}
+.title-slide h1{{font-size:var(--fs-title);max-width:960px}}
 .title-slide .rule{{width:120px;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));margin-top:34px}}
 .title-slide .glow{{position:absolute;right:-160px;top:-160px;width:620px;height:620px;border-radius:50%;
   background:radial-gradient(circle,var(--accent-soft),transparent 68%)}}
 
 /* basic layout */
-.basic h2{{font-size:46px;max-width:1000px}}
+.basic h2{{font-size:var(--fs-heading);max-width:1000px}}
 .basic h2::before{{content:"";display:block;width:56px;height:4px;border-radius:2px;background:var(--accent);margin-bottom:26px}}
 .basic .slide-body{{display:flex;flex-direction:column}}
 .basic .cards{{margin:auto 0;display:grid;gap:22px}}
 .basic .cards.n1{{grid-template-columns:1fr}} .basic .cards.n2{{grid-template-columns:repeat(2,1fr)}}
 .basic .cards.n3,.basic .cards.n5,.basic .cards.n6{{grid-template-columns:repeat(3,1fr)}} .basic .cards.n4{{grid-template-columns:repeat(2,1fr)}}
 .basic .card{{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:32px 32px;min-height:196px;display:flex;flex-direction:column;justify-content:space-between;gap:16px}}
-.basic .card b{{font:600 14px var(--bfont);color:var(--accent);letter-spacing:.08em}}
-.basic .card span{{font:500 28px/1.25 var(--hfont);letter-spacing:-.015em}}
-.basic .cards.n1 .card span{{font-size:34px}}
+.basic .card b{{font:600 var(--fs-small) var(--bfont);color:var(--accent);letter-spacing:.08em}}
+.basic .card span{{font:500 var(--fs-lead)/1.25 var(--hfont);letter-spacing:-.015em}}
+.basic .cards.n1 .card span{{font-size:var(--fs-heading)}}
 .basic .list{{margin:auto 0;columns:2;column-gap:56px;list-style:none}}
-.basic .list li{{break-inside:avoid;font:500 24px/1.35 var(--bfont);padding:14px 0 14px 34px;position:relative;border-top:1px solid var(--line)}}
+.basic .list li{{break-inside:avoid;font:500 var(--fs-body)/1.35 var(--bfont);padding:14px 0 14px 34px;position:relative;border-top:1px solid var(--line)}}
 .basic .list li::before{{content:"";position:absolute;left:0;top:25px;width:12px;height:12px;border-radius:3px;background:var(--accent)}}
 .basic.statement .slide-body{{display:flex;align-items:center}}
-.basic.statement h2{{font-size:60px;max-width:980px}}
+.basic.statement h2{{font-size:var(--fs-title);max-width:980px}}
 
 /* review player (hidden in the video) */
 #bar{{position:fixed;left:0;right:0;bottom:0;height:64px;background:#0b0b0f;color:#e8e8ee;display:flex;align-items:center;gap:12px;padding:0 16px;
@@ -125,9 +158,13 @@ def basic_slide(slide):
     n, items = len(slide.say), slide.show
     if not items:
         return "basic statement", f'<h2 data-c="0">{esc(slide.title)}</h2>'
-    cue = [min(n - 1, i * n // len(items)) for i in range(len(items))]
-    stagger = [sum(1 for j in range(i) if cue[j] == cue[i]) * 0.25 + (0.3 if cue[i] == 0 else 0) for i in range(len(items))]
-    attrs = [f'data-c="{c}"' + (f' data-d="{d:g}"' if d else "") for c, d in zip(cue, stagger)]
+    # a point that is spoken in a sentence appears on those words; the others are spread across the narration
+    spoken_in = [next((j for j, say in enumerate(slide.say) if _contains(say, x)), None) for x in items]
+    cue = [sp if sp is not None else min(n - 1, i * n // len(items)) for i, sp in enumerate(spoken_in)]
+    stagger = [0 if spoken_in[i] is not None else sum(1 for j in range(i) if cue[j] == cue[i]) * 0.25 + (0.3 if cue[i] == 0 else 0)
+               for i in range(len(items))]
+    attrs = [f'data-c="{c}"' + (f' data-cue="{esc(x)}"' if sp is not None else "") + (f' data-d="{d:g}"' if d else "")
+             for x, c, d, sp in zip(items, cue, stagger, spoken_in)]
     if len(items) <= 6 and all(len(x) <= 60 for x in items):
         cards = "".join(f'<div class="card" {a}><b>{i + 1:02}</b><span>{esc(x)}</span></div>' for i, (x, a) in enumerate(zip(items, attrs)))
         body = f'<div class="cards n{len(items)}">{cards}</div>'
@@ -142,12 +179,23 @@ PLAYER_JS = """
   scenes.forEach(function(s, si){ s.chunks.forEach(function(t, ci){ flat.push([si, ci, t]); }); });
   var pos = 0, timer = null, stage = document.getElementById('stage');
   var cap = document.querySelector('#bar .cap'), count = document.querySelector('#bar .count'), play = document.getElementById('play');
+  function norm(w){ return w.toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+  function cueDelay(e, text){            // estimate: ~0.4 s per word before the cued word (the video uses the voice's real timings)
+    var cue = (e.getAttribute('data-cue') || '').split(/\s+/).map(norm).filter(Boolean);
+    if (!cue.length) return 0;
+    var words = text.split(/\s+/).map(norm);
+    for (var i = 0; i + cue.length <= words.length; i++)
+      if (cue.every(function(c, k){ return words[i + k] === c; })) return Math.max(0, i * 0.4 - 0.08);
+    return 0;
+  }
   function render(){
     var si = flat[pos][0], ci = flat[pos][1];
     scenes.forEach(function(s, i){
       var el = document.getElementById(s.id); el.classList.toggle('active', i === si);
       el.querySelectorAll('[data-c]').forEach(function(e){
-        var d = e.getAttribute('data-d'); if (d) e.style.setProperty('--d', d + 's');
+        var d = parseFloat(e.getAttribute('data-d') || 0);
+        if (e.hasAttribute('data-cue')) d += cueDelay(e, s.chunks[+e.dataset.c] || '');
+        if (d) e.style.setProperty('--d', d + 's');
         e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci));
       });
     });
@@ -224,6 +272,14 @@ def basic_module(module, brand):
     return assemble(module, brand, [basic_slide(s) for s in module.slides])
 
 
+def _cue_words(text): return [w for w in (re.sub(r"[^a-z0-9]+", "", x.lower()) for x in text.split()) if w]
+
+
+def _contains(sentence, phrase):
+    words, cue = _cue_words(sentence), _cue_words(phrase)
+    return any(words[i:i + len(cue)] == cue for i in range(len(words) - len(cue) + 1))
+
+
 def check(html_text, module):
     """Problems that would make the module unusable for video; empty when it's fine."""
     from html2mp4.cli import load_scenes, ConversionError
@@ -242,6 +298,10 @@ def check(html_text, module):
         bad = sorted(c for c in used if c >= len(chunks))
         if bad: problems.append(f"Slide {sid} reveals content on narration step {bad[0] + 1}, but it only has {len(chunks)}.")
         if 0 not in used: problems.append(f"Slide {sid} shows nothing with its first sentence.")
+        for m in re.finditer(r'<[^>]*\bdata-c="(\d+)"[^>]*\bdata-cue="([^"]*)"|<[^>]*\bdata-cue="([^"]*)"[^>]*\bdata-c="(\d+)"', sec.group(1)):
+            c = int(m.group(1) or m.group(4)); cue = html.unescape(m.group(2) or m.group(3))
+            if c < len(chunks) and _cue_words(cue) and not _contains(chunks[c], cue):
+                problems.append(f"Slide {sid}: the cue “{cue}” isn't in narration step {c + 1}.")
     return problems
 
 

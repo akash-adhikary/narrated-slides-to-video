@@ -50,7 +50,7 @@ class Cancelled(Exception):
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 5                      # bump to invalidate cached video renders
+RENDER_VERSION = 6                      # bump to invalidate cached video renders
 
 FPS = 30
 # Output size; the stage is rendered natively at that scale (vector-sharp, never upscaled). 1440p keeps colour detail at
@@ -90,7 +90,18 @@ PAGE_JS = """
     if (!started.has(a)) { started.set(a, t); a.pause(); }
     a.currentTime = Math.max(0, (t - started.get(a)) * 1000);
   });
+  const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
   window.__html2mp4 = {
+    // data-cue="word or phrase": the element appears when the narrator says it (plus any data-d). times[scene][chunk] = [[word, t], ...]
+    setWordTimes: times => scenes.forEach((s, si) => items[si].forEach(e => {
+      const cue = (e.getAttribute('data-cue') || '').split(/\\s+/).map(norm).filter(Boolean);
+      if (!cue.length) return;
+      const words = ((times[si] || [])[+e.dataset.c]) || [];
+      let at = 0;
+      for (let i = 0; i + cue.length <= words.length; i++)
+        if (cue.every((c, k) => words[i + k][0] === c)) { at = Math.max(0, words[i][1] - 0.08); break; }
+      e.style.setProperty('--d', (at + parseFloat(e.getAttribute('data-d') || 0)) + 's');
+    })),
     size: () => [stage.offsetWidth, stage.offsetHeight],
     spans: () => items.map(list => { const m = {}; list.forEach(e => { const c = +e.dataset.c; m[c] = Math.max(m[c] || 0, span(e)); }); return m; }),
     reset: () => {
@@ -173,27 +184,59 @@ def kokoro_pipeline(lang):
     return _PIPELINES[lang]
 
 
-def synthesize(scenes, voice, speed, cache, progress=lambda f: None):
+def spoken(text, pronounce=None):
+    """The text sent to the voice: the sentence with the glossary's pronunciations applied (captions keep the original)."""
+    for written, said in (pronounce or {}).items():
+        text = re.sub(rf"(?<![\w]){re.escape(written)}(?![\w])", said, text)
+    return text
+
+
+def _norm_word(w): return re.sub(r"[^a-z0-9]+", "", w.lower())
+
+
+def synthesize(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False):
+    """Voice every sentence (cached). With timings=True, also make sure each clip has its word-timing file."""
     cache.mkdir(parents=True, exist_ok=True)
-    key = lambda text: cache / f"{voice}_{speed}_{hashlib.sha1(text.encode()).hexdigest()[:12]}.wav"
-    todo = [c for sc in scenes for c in sc["chunks"] if not key(c).exists()]
+    key = lambda text: cache / f"{voice}_{speed}_{hashlib.sha1(spoken(text, pronounce).encode()).hexdigest()[:12]}.wav"
+    need = lambda c: not key(c).exists() or (timings and not key(c).with_suffix(".json").exists())
+    todo = list(dict.fromkeys(c for sc in scenes for c in sc["chunks"] if need(c)))
     if todo:
         log(f"narrating {len(todo)} sentence(s) with Kokoro voice '{voice}' at {speed}x")
         import warnings; warnings.filterwarnings("ignore")
         with _TTS_LOCK:
-            _synthesize_todo(todo, voice, speed, key, progress)
+            _synthesize_todo(todo, voice, speed, key, progress, lambda t: spoken(t, pronounce), need)
     return [[sf.read(key(c), dtype="float32")[0] for c in sc["chunks"]] for sc in scenes]
 
 
-def _synthesize_todo(todo, voice, speed, key, progress):
+def word_times(scenes, voice, speed, cache, pronounce=None):
+    """[[ [(word, seconds_from_clip_start), ...] per sentence ] per scene], read from the clips' timing files."""
+    out = []
+    for sc in scenes:
+        row = []
+        for c in sc["chunks"]:
+            f = (cache / f"{voice}_{speed}_{hashlib.sha1(spoken(c, pronounce).encode()).hexdigest()[:12]}.json")
+            row.append([tuple(x) for x in json.loads(f.read_text())] if f.exists() else [])
+        out.append(row)
+    return out
+
+
+def _synthesize_todo(todo, voice, speed, key, progress, say=lambda t: t, need=lambda c: True):
     pipe = kokoro_pipeline(voice[0])
     for i, text in enumerate(todo):
         progress(i / len(todo))
-        if key(text).exists(): continue                                # made meanwhile by another caller
-        a = np.concatenate([x.numpy() for _, _, x in pipe(text, voice=voice, speed=speed)])
+        if not need(text): continue                                    # made meanwhile by another caller
+        pieces, words, offset = [], [], 0.0
+        for r in pipe(say(text), voice=voice, speed=speed):
+            pieces.append(r.audio.numpy() if hasattr(r.audio, "numpy") else r.audio)
+            for t in (getattr(r, "tokens", None) or []):
+                if t.start_ts is not None and _norm_word(t.text): words.append((_norm_word(t.text), offset + t.start_ts))
+            offset += len(pieces[-1]) / TTS_SR
+        a = np.concatenate(pieces)
         idx = np.where(np.abs(a) > 0.004)[0]                           # trim silence, keep 30 ms
         pad = int(0.03 * TTS_SR)
-        sf.write(key(text), a[max(0, idx[0] - pad): idx[-1] + pad], TTS_SR)
+        start = max(0, idx[0] - pad)
+        sf.write(key(text), a[start: idx[-1] + pad], TTS_SR)
+        key(text).with_suffix(".json").write_text(json.dumps([(w, round(max(0.0, t - start / TTS_SR), 3)) for w, t in words]))
 
 
 # ---------------------------------------------------------------- browser
@@ -211,11 +254,12 @@ def open_page(p, html, width=1920):
     return browser, page
 
 
-def measure_spans(html, ids):
+def measure_spans(html, ids, times=None):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser, page = open_page(p, html)
         page.evaluate(PAGE_JS, ids)
+        if times: page.evaluate("t => __html2mp4.setWordTimes(t)", times)
         spans = page.evaluate("__html2mp4.spans()")
         browser.close()
     return spans
@@ -249,12 +293,13 @@ def x264(crf, fast=False, threads=0):
 
 
 def render_segment(job):
-    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause = job
+    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause, times = job
     if nice: os.nice(nice)              # background renders yield the CPU to interactive work (previews)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser, page = open_page(p, pathlib.Path(html), width)
         page.evaluate(PAGE_JS, ids)
+        if times: page.evaluate("t => __html2mp4.setWordTimes(t)", times)
         page.evaluate("__html2mp4.reset()")
         cdp = page.context.new_cdp_session(page)
         vw, vh = page.viewport_size["width"], page.viewport_size["height"]
@@ -286,9 +331,9 @@ def render_segment(job):
 
 
 def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False,
-                 cancel=None, nice=0, pausable=False):
+                 cancel=None, nice=0, pausable=False, times=None):
     nframes = int(round(total * FPS))
-    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
     if video.exists() and keyfile.exists() and keyfile.read_text() == key:
         log("video unchanged — reusing cached render"); return video
@@ -303,7 +348,7 @@ def render_video(html, ids, events, total, work, workers, progress=lambda f: Non
         q, stop, pause = mgr.Queue(), mgr.Event(), mgr.Event()
         futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
                                               str(segdir / f"{i:03}.mp4"), q, size, crf, fast, stop, threads, nice,
-                                              pause if pausable else None))
+                                              pause if pausable else None, times))
                    for i in range(workers)]
         done = 0
         while not all(f.done() for f in futures):
@@ -485,21 +530,31 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     log(f"{html.name}: {len(scenes)} scene(s), {sum(len(s['chunks']) for s in scenes)} sentences")
 
     voice_progress = step("voice")
-    spans = measure_spans(html, ids)
+    from html2mp4 import config
+    pron = config.glossary()["pronunciations"]
+    cued = "data-cue=" in text                      # exact word timings are only needed for cue-timed reveals
+    tts_cache = CACHE / "tts"
+    times = None
+
+    def timeline_for(subset):
+        nonlocal times
+        audio = synthesize(subset, voice, speed, tts_cache, voice_progress, pron, timings=cued)
+        times = word_times(subset, voice, speed, tts_cache, pron) if cued else None
+        spans = measure_spans(html, [s["id"] for s in subset], times)
+        return build_timeline(subset, audio, spans)
+
     if preview_seconds:      # narrate only as many scenes as the preview needs
         for n in range(1, len(scenes) + 1):
-            audio = synthesize(scenes[:n], voice, speed, CACHE / "tts", voice_progress)
-            events, clips, total = build_timeline(scenes[:n], audio, spans[:n])
+            events, clips, total = timeline_for(scenes[:n])
             if total >= preview_seconds: break
         total = min(total, float(preview_seconds))
         events = [e for e in events if e[0] < total]
         clips = [c for c in clips if c[0] < total]
     else:
-        audio = synthesize(scenes, voice, speed, CACHE / "tts", voice_progress)
-        events, clips, total = build_timeline(scenes, audio, spans)
+        events, clips, total = timeline_for(scenes)
     step("layout")
     video = render_video(html, ids, events, total, work, workers, step("frames"), cancel=cancel, nice=nice, pausable=pausable,
-                         size=QUALITIES[quality], fast=bool(preview_seconds))
+                         size=QUALITIES[quality], fast=bool(preview_seconds), times=times)
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
     step("finish")

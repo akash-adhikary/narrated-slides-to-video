@@ -12,6 +12,15 @@
 
 Narration is kept exactly as written. Lines starting with // are comments. A line that doesn't start with a
 marker continues the previous Say:, Show: or Note:.
+
+A second, more natural format is also accepted (detected by its "Scene N:" lines):
+
+    One micro-learning: How to Interview Candidates      <- the first line is the title
+    Scene 1: The opening (0:00 to 0:30)
+    On screen: "Every hire shapes the team."             <- what should be shown (a description, not exact text)
+    Think back to the best colleague you've worked with. What made them the best?   <- narration paragraph
+
+Each narration paragraph is split into sentences, one narration step each.
 """
 import dataclasses, re
 
@@ -24,8 +33,10 @@ class ScriptError(ValueError):
 class Slide:
     title: str
     say: list = dataclasses.field(default_factory=list)
-    show: list = dataclasses.field(default_factory=list)
-    note: str = ""
+    show: list = dataclasses.field(default_factory=list)   # exact on-screen points (Show: / bullets)
+    note: str = ""                                          # a design hint
+    screen: str = ""                                        # the author's description of what appears ("On screen:")
+    timing: str = ""                                        # the author's intended window, e.g. "0:30 to 1:30"
 
 
 @dataclasses.dataclass
@@ -45,11 +56,43 @@ class Module:
 
 
 MARKER = re.compile(r"^(title|subtitle|say|show|note)\s*:\s*(.*)$", re.I)
+SCENE = re.compile(r"^scene\s+(\d+)\s*[:.\-–—]\s*(.*?)\s*(?:\(([^)]*\d:\d\d[^)]*)\))?\s*$", re.I)
+ON_SCREEN = re.compile(r"^(?:on[- ]screen(?: text)?|screen|visual)\s*:\s*(.*)$", re.I)
+ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "etc.", "mr.", "mrs.", "ms.", "dr.", "inc.", "approx.", "no.", "st.")
+
+
+def split_sentences(text):
+    """Split a paragraph into sentences without breaking inside quotes or after abbreviations."""
+    text = " ".join(text.split())
+    pieces = re.split(r"(?<=[.!?])(?<![0-9]\.)([\"”’')]?)\s+(?=[A-Z“\"‘(])", text)
+    # re.split with one group alternates text, captured closing mark, text, ...
+    parts, i = [], 0
+    while i < len(pieces):
+        piece = pieces[i] + (pieces[i + 1] if i + 1 < len(pieces) else "")
+        i += 2
+        parts.append(piece)
+    out = []
+    for part in parts:
+        if out:
+            prev = out[-1]
+            open_quote = prev.count("“") > prev.count("”") or prev.count('"') % 2 == 1
+            last_word = prev.split()[-1].lower() if prev.split() else ""
+            if open_quote or last_word in ABBREVIATIONS:
+                out[-1] = f"{prev} {part}"; continue
+        out.append(part)
+    return [x.strip() for x in out if x.strip()]
+
+
+def _quoted(text):
+    """Quoted phrases in a description, e.g. “Every hire shapes the team.” (curly or straight quotes)."""
+    return [q.strip() for q in re.findall(r"[“\"]([^”\"]{2,120})[”\"]", text)]
 SPLIT_SHOW = re.compile(r"\s*[·•|;]\s*")
 
 
 def parse(text, title=None, subtitle=None):
     """Parse a script. `title`/`subtitle` (e.g. from a CSV column) override the script's own."""
+    if any(SCENE.match(l.strip()) for l in text.splitlines()):
+        return _parse_scenes(text, title, subtitle)
     m = Module(title="", subtitle="")
     slide, last = None, None            # last = (kind, target) for continuation lines
     for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
@@ -99,6 +142,45 @@ def parse(text, title=None, subtitle=None):
     if not m.slides: raise ScriptError("The script has no slides: start each slide with '## Slide title'.")
     for s in m.slides:
         if not s.say: raise ScriptError(f"Slide “{s.title}” has no narration: add at least one 'Say:' line.")
+    return m
+
+
+def _parse_scenes(text, title, subtitle):
+    m = Module(title="", subtitle="")
+    slide, head, in_screen = None, [], False
+    for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            in_screen = False if not line else in_screen
+            continue
+        sc = SCENE.match(line)
+        if sc:
+            slide = Slide(title=sc.group(2).strip() or f"Scene {sc.group(1)}", timing=(sc.group(3) or "").replace("–", "to").strip())
+            m.slides.append(slide); in_screen = False
+            continue
+        if slide is None:
+            head.append(line); continue
+        os_ = ON_SCREEN.match(line)
+        if os_:
+            slide.screen = os_.group(1).strip(); in_screen = True; continue
+        mk = MARKER.match(line)
+        if mk and mk.group(1).lower() == "note":
+            slide.note = (slide.note + " " + mk.group(2)).strip(); in_screen = False; continue
+        if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
+            slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
+        in_screen = False
+        slide.say += split_sentences(line)
+    if head:
+        first = head[0]
+        m.title = re.sub(r"^(?:one\s+)?micro-?learning\s*[:\-–—]\s*", "", first, flags=re.I).strip()
+        if len(head) > 1: m.subtitle = " ".join(head[1:])[:120]
+    for s in m.slides:
+        s.show = _quoted(s.screen) if s.screen and len(_quoted(s.screen)) >= 1 and len(s.screen) < 160 else []
+    if title: m.title = title.strip()
+    if subtitle: m.subtitle = subtitle.strip()
+    if not m.title: raise ScriptError("The script needs a title: put it on the first line, before 'Scene 1:'.")
+    for s in m.slides:
+        if not s.say: raise ScriptError(f"Scene “{s.title}” has no narration: write what the narrator says under it.")
     return m
 
 

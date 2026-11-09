@@ -76,6 +76,27 @@ def clear_api_key():
     data = load(); data.pop("anthropic_api_key", None); save(data)
 
 
+# ---------------------------------------------------------------- glossary
+
+DEFAULT_GLOSSARY = {"pronunciations": {}, "banned": [], "approved": []}
+
+
+def glossary():
+    """Pronunciations ({written: spoken}), banned terms (the designer must not use them) and approved terms."""
+    g = load().get("glossary", {})
+    return {k: g.get(k, v) for k, v in DEFAULT_GLOSSARY.items()}
+
+
+def set_glossary(changes):
+    g = glossary()
+    if "pronunciations" in changes:
+        g["pronunciations"] = {str(k).strip(): str(v).strip() for k, v in dict(changes["pronunciations"]).items() if str(k).strip() and str(v).strip()}
+    for k in ("banned", "approved"):
+        if k in changes: g[k] = [str(x).strip() for x in changes[k] if str(x).strip()]
+    data = load(); data["glossary"] = g; save(data)
+    return g
+
+
 # ---------------------------------------------------------------- brand
 
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
