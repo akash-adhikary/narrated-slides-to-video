@@ -22,8 +22,16 @@ DEFAULT_BRAND = {
     "heading_font": "Inter",
     "body_font": "Inter",
     "footer_text": "",
-    "logo": "",                      # data URI, or empty
+    "logo_on_dark": "",              # data URI of a light-coloured logo, used on dark slides
+    "logo_on_light": "",             # data URI of a dark logo, used on light slides
+    "logo": "",                      # older single-logo setting; used when the two above are empty
+    # filled by importing a brand kit (brandkit.py); passed to the slide designer
+    "palette": [],                   # [{name, hex, group, usage}]
+    "rules": [],                     # design rules from the guidelines
+    "kit_name": "",
+    "reference": "",                 # file name of the module used as a style reference
 }
+KIT_FIELDS = ("palette", "rules", "kit_name", "reference", "logo", "logo_on_dark", "logo_on_light")
 LOGO_MAX_BYTES = 512 * 1024
 
 
@@ -81,11 +89,11 @@ def update_brand(changes):
     """Validate and save brand fields; unknown fields are ignored. Returns the full brand."""
     b = brand()
     for k, v in changes.items():
-        if k not in DEFAULT_BRAND or k == "logo": continue
+        if k not in DEFAULT_BRAND or k in KIT_FIELDS: continue
         if k in ("background", "text", "accent", "accent2"):
             if not HEX.match(str(v)): raise ValueError(f"{k} must be a colour like #1a2b3c")
         elif k in ("heading_font", "body_font"):
-            if v not in FONTS: raise ValueError(f"{k} must be one of: {', '.join(FONTS)}")
+            if v not in available_fonts(): raise ValueError(f"{k} must be one of: {', '.join(available_fonts())}")
         elif k == "style":
             if v not in STYLES: raise ValueError("style must be dark or light")
         elif k == "footer_text":
@@ -95,10 +103,23 @@ def update_brand(changes):
     return b
 
 
-def set_logo(data_uri):
-    data = load(); data["brand"]["logo"] = data_uri; save(data)
+def available_fonts():
+    """Fonts installed from a brand kit first, then the built-in Google Fonts choices."""
+    try: custom = [f["family"] for f in json.loads((CONFIG_DIR / "fonts" / "fonts.json").read_text())]
+    except (FileNotFoundError, ValueError): custom = []
+    return custom + [f for f in FONTS if f not in custom]
+
+
+def set_logo(data_uri, slot="logo_on_dark"):
+    data = load(); data["brand"][slot] = data_uri; save(data)
+
+
+def logo_for(b):
+    """The logo for this brand's slide style."""
+    return (b.get("logo_on_dark") if b.get("style", "dark") == "dark" else b.get("logo_on_light")) or b.get("logo", "")
 
 
 def reset_brand():
     data = load(); data["brand"] = dict(DEFAULT_BRAND); save(data)
+    (CONFIG_DIR / "reference.html").unlink(missing_ok=True)
     return data["brand"]

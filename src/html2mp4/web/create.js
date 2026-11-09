@@ -270,5 +270,5 @@ $("#lib").addEventListener("click", async e => {
   if(video || preview) $("#cardCreate").classList.remove("locked");
   if(preview) pollPreview(preview, null);
   if(video) track(video);
-  setInterval(loadLibrary, 4000);                 // keeps the list current if work was started elsewhere
+  setInterval(() => loadLibrary().catch(() => {}), 4000);                 // keeps the list current if work was started elsewhere
 })().catch(err => toast(err.message));

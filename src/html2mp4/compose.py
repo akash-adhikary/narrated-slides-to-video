@@ -17,8 +17,30 @@ def scene_ids(module):
     return ids + [f"s{i + 1}" for i in range(len(module.slides))]
 
 
-def fonts_link(brand):
-    fams = sorted({brand["heading_font"], brand["body_font"]})
+def font_faces(brand):
+    """Brand-kit fonts embedded as @font-face (exact and offline); returns (css, families covered)."""
+    import base64
+    from html2mp4 import config
+    try: registry = json.loads((config.CONFIG_DIR / "fonts" / "fonts.json").read_text())
+    except (FileNotFoundError, ValueError): return "", set()
+    wanted = {brand["heading_font"], brand["body_font"]}
+    css, covered = [], set()
+    for fam in registry:
+        if fam["family"] not in wanted: continue
+        for f in fam["files"]:
+            path = config.CONFIG_DIR / "fonts" / f["file"]
+            if not path.exists(): continue
+            fmt = {".woff2": "woff2", ".woff": "woff", ".otf": "opentype"}.get(path.suffix.lower(), "truetype")
+            mime = {"woff2": "font/woff2", "woff": "font/woff", "opentype": "font/otf"}.get(fmt, "font/ttf")
+            css.append(f'@font-face{{font-family:"{fam["family"]}";src:url(data:{mime};base64,{base64.b64encode(path.read_bytes()).decode()}) '
+                       f'format("{fmt}");font-weight:{f["weight"]};font-style:{"italic" if f.get("italic") else "normal"};font-display:block}}')
+            covered.add(fam["family"])
+    return "\n".join(css), covered
+
+
+def fonts_link(brand, covered=()):
+    fams = sorted({brand["heading_font"], brand["body_font"]} - set(covered))
+    if not fams: return ""
     q = "&".join(f"family={f.replace(' ', '+')}:wght@400;500;600;700" for f in fams)
     return f'<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' \
            f'<link href="https://fonts.googleapis.com/css2?{q}&display=swap" rel="stylesheet">'
@@ -46,7 +68,7 @@ html,body{{height:100%;background:#000;overflow:hidden}}
 h1,h2,h3{{font-family:var(--hfont);font-weight:600;letter-spacing:-.02em;line-height:1.1}}
 .slide-foot{{position:absolute;left:80px;right:80px;bottom:36px;height:24px;display:flex;align-items:center;justify-content:space-between;
   font:500 13px var(--bfont);color:var(--faint);letter-spacing:.02em}}
-.slide-foot img{{height:22px;width:auto;display:block}}
+.slide-foot img{{height:26px;width:auto;display:block}}
 .dots{{display:flex;gap:6px}} .dots i{{width:6px;height:6px;border-radius:50%;background:var(--line)}} .dots i.on{{background:var(--accent)}}
 
 /* title slide */
@@ -86,7 +108,9 @@ h1,h2,h3{{font-family:var(--hfont);font-weight:600;letter-spacing:-.02em;line-he
 
 def _footer(brand, index, total):
     dots = "".join(f'<i class="{"on" if i == index else ""}"></i>' for i in range(total)) if total > 1 else ""
-    logo = f'<img src="{esc(brand["logo"])}" alt="">' if brand.get("logo") else ""
+    from html2mp4 import config
+    src = config.logo_for(brand)
+    logo = f'<img src="{esc(src)}" alt="">' if src else ""
     return f'<div class="slide-foot"><span>{esc(brand.get("footer_text", ""))}</span><div class="dots">{dots}</div>{logo or "<span></span>"}</div>'
 
 
@@ -162,6 +186,7 @@ def assemble(module, brand, slides, css=""):
     scene_js = ",\n".join(f"  {{id:'{sid}', chunks:{json.dumps(c, ensure_ascii=False)}}}" for sid, c in zip(ids, chunks))
     scene_js = scene_js.replace("</", "<\\/")
     source = json.dumps(module.to_dict(), ensure_ascii=False).replace("</", "<\\/")
+    faces, covered = font_faces(brand)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -169,8 +194,9 @@ def assemble(module, brand, slides, css=""):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="html2mp4 {__version__}">
 <title>{esc(module.title)}</title>
-{fonts_link(brand)}
+{fonts_link(brand, covered)}
 <style>
+{faces}
 {theme_css(brand)}
 {css}
 </style>

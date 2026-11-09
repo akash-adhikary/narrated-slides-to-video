@@ -34,6 +34,9 @@ dependencies = [
     "uvicorn>=0.29",
     "python-multipart>=0.0.9",
     "anthropic>=2.6",
+    "fonttools>=4.50",
+    "pypdf>=5",
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]

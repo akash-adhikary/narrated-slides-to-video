@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import cli, compose, config, music as music_beds, script
+from html2mp4 import brandkit, cli, compose, config, music as music_beds, script
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
@@ -27,6 +27,15 @@ MUSIC_INFO = {
 
 app = FastAPI(title="html2mp4 Studio", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """Browsers must check for a newer page and scripts, so an update (git pull) shows up on the next reload."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 jobs: dict[str, dict] = {}
 # two lanes so a quick preview never waits behind a full video; each lane does one job at a time
 queues: dict[str, "queue.Queue[str]"] = {"video": queue.Queue(), "preview": queue.Queue()}
@@ -327,7 +336,7 @@ def verify_key(key=None):
 
 @app.get("/api/settings")
 def get_settings():
-    return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.FONTS}
+    return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.available_fonts()}
 
 
 class KeyIn(BaseModel):
@@ -367,20 +376,54 @@ def reset_brand(): return config.reset_brand()
 
 
 @app.post("/api/settings/logo")
-async def post_logo(file: UploadFile = File(...)):
+async def post_logo(file: UploadFile = File(...), slot: str = "logo_on_dark"):
+    if slot not in ("logo_on_dark", "logo_on_light"): raise HTTPException(400, "Unknown logo slot.")
     types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp"}
     mime = types.get(pathlib.Path(file.filename or "").suffix.lower())
     if not mime: raise HTTPException(400, "Please choose a PNG, JPG, SVG or WebP image.")
     data = await file.read()
     if len(data) > config.LOGO_MAX_BYTES: raise HTTPException(400, "That image is larger than 512 KB. Try a smaller or compressed version.")
     import base64
-    config.set_logo(f"data:{mime};base64,{base64.b64encode(data).decode()}")
+    config.set_logo(f"data:{mime};base64,{base64.b64encode(data).decode()}", slot)
     return config.brand()
 
 
 @app.delete("/api/settings/logo")
-def delete_logo():
-    config.set_logo(""); return config.brand()
+def delete_logo(slot: str = "logo_on_dark"):
+    if slot not in ("logo_on_dark", "logo_on_light"): raise HTTPException(400, "Unknown logo slot.")
+    config.set_logo("", slot)
+    if not config.brand().get("logo_on_dark") and not config.brand().get("logo_on_light"): config.set_logo("", "logo")
+    return config.brand()
+
+
+@app.post("/api/brandkit/analyze")
+async def brandkit_analyze(files: list[UploadFile] = File(...)):
+    """Read a dropped brand kit (folder, zip, PDF, logos, fonts, module) and propose a brand to review."""
+    from starlette.concurrency import run_in_threadpool
+    items = [(f.filename or "file", await f.read()) for f in files]
+    if sum(len(d) for _, d in items) > 200 * 1024 * 1024: raise HTTPException(400, "That's more than 200 MB. Drop just the brand files.")
+    try:
+        p = await run_in_threadpool(brandkit.analyze, items)
+    except Exception as e:  # noqa: BLE001 — a malformed file shouldn't take the Studio down
+        raise HTTPException(400, f"Couldn't read those files ({type(e).__name__}: {e}).")
+    if not (p["palette"] or p["logos"] or p["fonts"]):
+        raise HTTPException(400, "Nothing usable was found. Drop a brand guidelines PDF, logos, font files, or a module (.html).")
+    return p
+
+
+class KitApply(BaseModel):
+    id: str
+    choices: dict = {}
+
+
+@app.post("/api/brandkit/apply")
+def brandkit_apply(body: KitApply):
+    try: return brandkit.apply(body.id, body.choices)
+    except ValueError as e: raise HTTPException(400, str(e))
+
+
+@app.post("/api/brandkit/remove")
+def brandkit_remove(): return brandkit.remove_kit()
 
 
 @app.get("/api/settings/brand-preview", response_class=HTMLResponse)

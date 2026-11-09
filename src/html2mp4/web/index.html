@@ -165,6 +165,39 @@
 
   <section class="card" aria-labelledby="hBrand">
     <div class="card-h"><h2 id="hBrand">Brand kit</h2><p>Applied to every module designed from a script</p></div>
+
+    <div class="kit-current" id="kitCurrent" hidden></div>
+
+    <div class="kit-drop" id="kitDrop">
+      <div class="kit-drop-text"><strong>Import a brand kit</strong>
+        <span>Drop a brand folder or .zip, a guidelines PDF, logos, font files, or a module you've made before. You'll review everything before it's applied.</span></div>
+      <div class="kit-drop-actions">
+        <label class="btn-ghost" for="kitFolder">Choose folder</label><input type="file" id="kitFolder" webkitdirectory multiple hidden>
+        <label class="btn-ghost" for="kitFiles">Choose files</label><input type="file" id="kitFiles" multiple hidden
+          accept=".zip,.pdf,.svg,.png,.jpg,.jpeg,.webp,.ttf,.otf,.woff,.woff2,.html,.htm">
+      </div>
+    </div>
+
+    <div class="kit-review" id="kitReview" hidden>
+      <div class="kit-review-h"><div><h3 id="kitName">Brand kit</h3><div class="kit-sources" id="kitSources"></div></div>
+        <div class="actions"><button class="btn-ghost" type="button" id="kitCancel">Cancel</button><button class="btn sm" type="button" id="kitApply">Apply brand kit</button></div></div>
+      <div class="kit-section"><h4>Colours</h4><div class="swatches" id="kitPalette"></div></div>
+      <div class="kit-section"><h4>Slides</h4>
+        <div class="seg" id="kitStyle" role="radiogroup" aria-label="Slide style">
+          <button type="button" role="radio" data-v="dark" aria-checked="true">Dark</button>
+          <button type="button" role="radio" data-v="light" aria-checked="false">Light</button></div>
+        <div class="roles" id="kitRoles"></div>
+        <small class="hint">Click a role, then a colour above to change it.</small></div>
+      <div class="kit-section two"><div><h4>Heading font</h4><select id="kitHead"></select></div><div><h4>Body font</h4><select id="kitBody"></select></div></div>
+      <div class="kit-section"><h4>Logos</h4><div class="logo-picks">
+        <label>On dark slides<select id="kitLogoDark"></select></label><label>On light slides<select id="kitLogoLight"></select></label></div>
+        <div class="logo-thumbs" id="kitLogoThumbs"></div></div>
+      <div class="kit-section" id="kitRulesWrap"><h4>Design rules <span class="count" id="kitRulesCount"></span></h4>
+        <small class="hint">Claude follows these when designing slides from a script.</small><ul class="rules" id="kitRules"></ul></div>
+      <label class="kit-ref" id="kitRefWrap"><input type="checkbox" id="kitRef" checked> <span>Use <b id="kitRefName"></b> as the style reference, so new slides match its look</span></label>
+      <div class="kit-notes" id="kitNotes"></div>
+    </div>
+
     <div class="brand-grid">
       <div class="brand-form" id="brandForm">
         <div class="field"><label>Slide style</label>
@@ -183,10 +216,14 @@
           <label>Body font<select data-k="body_font" id="fBody"></select></label>
         </div>
         <div class="field"><label>Footer text<input type="text" data-k="footer_text" maxlength="80" placeholder="e.g. Acme Learning"></label></div>
-        <div class="field"><label>Logo</label>
-          <div class="logo-row"><div class="logo-box" id="logoBox">No logo</div>
-            <label class="link" for="logoInput">Upload</label><input type="file" id="logoInput" accept="image/png,image/jpeg,image/svg+xml,image/webp" hidden>
-            <button class="link" type="button" id="logoRemove">Remove</button></div>
+        <div class="field"><label>Logo on dark slides</label>
+          <div class="logo-row"><div class="logo-box dark" id="logoBoxDark">No logo</div>
+            <label class="link" for="logoInputDark">Upload</label><input type="file" id="logoInputDark" data-slot="logo_on_dark" accept="image/png,image/jpeg,image/svg+xml,image/webp" hidden>
+            <button class="link" type="button" id="logoRemoveDark" data-slot="logo_on_dark">Remove</button></div></div>
+        <div class="field"><label>Logo on light slides</label>
+          <div class="logo-row"><div class="logo-box" id="logoBoxLight">No logo</div>
+            <label class="link" for="logoInputLight">Upload</label><input type="file" id="logoInputLight" data-slot="logo_on_light" accept="image/png,image/jpeg,image/svg+xml,image/webp" hidden>
+            <button class="link" type="button" id="logoRemoveLight" data-slot="logo_on_light">Remove</button></div>
           <small>PNG or SVG with a transparent background works best. Up to 512 KB.</small></div>
         <button class="text-btn" type="button" id="brandReset">Reset to the default look</button>
       </div>
