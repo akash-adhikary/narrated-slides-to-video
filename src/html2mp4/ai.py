@@ -24,17 +24,18 @@ def client(timeout=600):
         raise AIError("No Anthropic API key is set. Add one in Settings.")
 
 
-def structured(system, content, schema, effort="medium", max_tokens=32000, on_text=None, on_thinking=None):
+def structured(system, content, schema, effort="medium", max_tokens=32000, on_text=None, on_thinking=None, messages=None):
     """One request whose answer must match `schema`. Returns (data, usage).
 
     `on_text(text_so_far)` is called as the answer streams in, and `on_thinking(summary_so_far)` as Claude's thinking summary does
-    (the summary is what Anthropic exposes of its reasoning; it is billed the same whether or not it is shown)."""
+    (the summary is what Anthropic exposes of its reasoning; it is billed the same whether or not it is shown).
+    `messages` replaces `content` for a multi-turn conversation."""
     c = client()
     try:
         with c.beta.messages.stream(
             model=config.DESIGN_MODEL, max_tokens=max_tokens,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if isinstance(system, str) else system,
-            messages=[{"role": "user", "content": content}],
+            messages=messages or [{"role": "user", "content": content}],
             thinking={"type": "adaptive", "display": "summarized" if on_thinking else "omitted"},
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             betas=[FALLBACK_BETA], fallbacks="default",

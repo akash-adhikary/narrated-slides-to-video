@@ -27,12 +27,13 @@
   <section class="hero">
     <div class="eyebrow"><i></i>Step 1 of 2</div>
     <h1>Write your script. <em>Get your slides.</em></h1>
-    <p class="lede">Paste the narration and what should appear on screen. Claude designs branded slides, checks every one, and you refine them until they're right.</p>
+    <p class="lede">Talk your idea through with Claude, or paste a script you already have. Claude designs branded slides, checks every one, and you refine them until they're right.</p>
   </section>
 
   <section class="card" id="cardScript" aria-labelledby="hScript">
     <div class="card-h"><span class="num">1</span><h2 id="hScript">Your script</h2><p id="wStats"></p></div>
     <div class="script-tools">
+      <button class="link ask" type="button" id="wAsk"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l1.6 4.4L14 7l-4.4 1.6L8 13l-1.6-4.4L2 7l4.4-1.6z"/></svg>Build it with AI</button>
       <button class="link" type="button" id="wExample">Insert an example</button>
       <label class="link" for="wFile">Open a text file</label><input type="file" id="wFile" accept=".txt,.md,text/plain" hidden>
       <label class="link" for="wImport" title="A module file you or a colleague downloaded from the Studio">Open a module file (.html)</label><input type="file" id="wImport" accept=".html,.htm,text/html" hidden>
@@ -358,11 +359,37 @@ Note: three cards, left to right</pre>
 </div>
 </main>
 
+<div class="ai" id="ai">
+  <button class="ai-orb" id="aiOrb" type="button" aria-label="Open the script assistant" aria-expanded="false" aria-controls="aiPanel">
+    <span class="ai-orb-glow" aria-hidden="true"></span><span class="ai-orb-ring" aria-hidden="true"></span>
+    <span class="ai-orb-core" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.3 6.2 6.2 2.3-6.2 2.3L12 19.5l-2.3-6.2L3.5 11l6.2-2.3z"/><path d="M19 3v4M17 5h4" stroke-linecap="round"/></svg></span>
+    <span class="ai-orb-label">Build with AI</span>
+  </button>
+  <section class="ai-panel" id="aiPanel" role="dialog" aria-label="Script assistant" hidden>
+    <header class="ai-h">
+      <span class="ai-spark" aria-hidden="true"></span>
+      <div class="ai-title"><b>Script assistant</b><small id="aiState" aria-live="polite">Ready when you are</small></div>
+      <button type="button" class="ai-ic" id="aiNew" title="Start a new conversation">New chat</button>
+      <button type="button" class="ai-ic sq" id="aiWide" aria-label="Make the chat larger" title="Larger"><svg viewBox="0 0 16 16"><path d="M9.5 2H14v4.5M6.5 14H2V9.5M14 2L9 7M2 14l5-5"/></svg></button>
+      <button type="button" class="ai-ic sq" id="aiClose" aria-label="Close the chat"><svg viewBox="0 0 16 16"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button>
+    </header>
+    <div class="ai-log" id="aiLog" role="log" aria-live="polite" aria-label="Conversation"></div>
+    <div class="ai-chips" id="aiChips"></div>
+    <form class="ai-form" id="aiForm" autocomplete="off">
+      <textarea id="aiInput" rows="1" placeholder="Tell me what to write or change…" aria-label="Message to the assistant"></textarea>
+      <button type="button" class="ai-mic" id="aiMic" aria-label="Speak your message" title="Speak" hidden><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/></svg></button>
+      <button type="submit" class="ai-send" id="aiSend" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button>
+    </form>
+    <p class="ai-foot">Your script updates as we talk, and you can undo any change. Slides are only designed when you say so.</p>
+  </section>
+</div>
+
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/common.js"></script>
 <script src="/static/create.js"></script>
 <script src="/static/write.js"></script>
+<script src="/static/chat.js"></script>
 <script src="/static/settings.js"></script>
 </body>
 </html>

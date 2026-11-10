@@ -13,6 +13,7 @@ const pageHooks = {};                       // page name -> function run when th
 function route(){
   const h = location.hash.slice(1) || "write";
   const page = PAGES.includes(h) ? h : "create";
+  document.body.dataset.page = page;
   document.querySelectorAll(".page").forEach(p => p.hidden = p.id !== `page-${page}`);
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.page === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   if(h === "library") setTimeout(() => $("#library").scrollIntoView({behavior:"smooth"}), 50);

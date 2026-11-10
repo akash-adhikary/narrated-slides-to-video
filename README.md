@@ -22,7 +22,7 @@ by frame instead, so every animation lands on the sentence that triggers it and 
 
 ## Features
 
-- **From a script to slides.** Paste a script and Claude designs branded slides, a checker renders every step to catch overlaps, overflow and off-scale type, and you refine the result in plain language, with versions you can return to.
+- **From a script to slides.** Talk your idea through with a built-in AI assistant (or paste a script) and Claude designs branded slides, a checker renders every step to catch overlaps, overflow and off-scale type, and you refine the result in plain language, with versions you can return to.
 - **Your brand.** Import a brand folder or guidelines PDF and the Studio picks up the colours, typefaces, logos and design rules.
 - **A web app for non-technical users.** Pick a voice and music, listen to a 10-second preview, then create the video.
 - **Neural voiceover, generated locally** with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M): six curated US and UK voices and three speaking paces.

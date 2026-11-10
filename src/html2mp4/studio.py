@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import ai, brandkit, cli, compose, config, design, music as music_beds, projects, review, script, verify
+from html2mp4 import chat, ai, brandkit, cli, compose, config, design, music as music_beds, projects, review, script, verify
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
@@ -489,6 +489,49 @@ async def write_review(body: ScriptIn):
     try: found, cost = await run_in_threadpool(review.review, body.script)
     except ai.AIError as e: raise HTTPException(400, str(e))
     return {"suggestions": found, "cost": round(cost, 3)}
+
+
+# ---------------------------------------------------------------- write: talk to Claude to build the script
+
+chat_jobs: dict[str, dict] = {}
+
+
+class ChatIn(BaseModel):
+    messages: list[dict]
+    script: str = ""
+    project_id: str | None = None
+
+
+def run_chat(job, body, designed, slides):
+    try:
+        res = chat.turn(body.messages, body.script, designed, slides, on_reply=lambda t: job.update(reply=t))
+        job.update(status="done", result=res, reply=res["reply"])
+    except ai.AIError as e:
+        job.update(status="failed", error=str(e))
+    except Exception as e:  # noqa: BLE001 — surface anything unexpected, keep the Studio running
+        job.update(status="failed", error=f"Something went wrong ({type(e).__name__}: {e}).")
+
+
+@app.post("/api/write/chat")
+def write_chat(body: ChatIn):
+    """Start one assistant turn in the background; poll /api/write/chat/{id} for the reply as it streams in."""
+    if not config.api_key_status()["set"]: raise HTTPException(400, "The assistant needs an Anthropic API key. Add one in Settings.")
+    if not body.messages or body.messages[-1].get("role") != "user" or not str(body.messages[-1].get("content", "")).strip():
+        raise HTTPException(400, "Write a message first.")
+    p = projects.get(body.project_id) if body.project_id else None
+    designed = bool(p and p["versions"])
+    slides = {k: {"layout": v.get("layout", "")} for k, v in projects.slides(p["id"]).items()} if designed else {}
+    for k in [k for k, j in chat_jobs.items() if time.time() - j["created"] > 3600]: chat_jobs.pop(k, None)
+    jid = uuid.uuid4().hex[:10]
+    job = chat_jobs[jid] = {"id": jid, "status": "running", "reply": "", "created": time.time()}
+    threading.Thread(target=run_chat, args=(job, body, designed, slides), daemon=True).start()
+    return {"id": jid}
+
+
+@app.get("/api/write/chat/{jid}")
+def write_chat_job(jid: str):
+    if jid not in chat_jobs: raise HTTPException(404, "That reply is no longer available.")
+    return {k: v for k, v in chat_jobs[jid].items() if k != "created"}
 
 
 def moment_note(m):

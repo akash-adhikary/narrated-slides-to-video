@@ -7,6 +7,26 @@ to catch problems, and you refine the result until it's right.
 This page covers the script format, how the slides are designed and checked, and how to ask for changes. For making the
 video afterwards, see [Getting started](getting-started.md).
 
+## Building the script with AI
+
+You don't have to write the script yourself. Press the glowing **Build with AI** button at the bottom right of the Write page (or
+**Build it with AI** above the script box) and talk it through with Claude:
+
+- **Start from an idea.** Say what the video is about and who it's for. If the brief is thin, Claude asks a few short questions;
+  if you say "just write it", it drafts straight away and tells you what it assumed. You can type or press the microphone to speak.
+- **Keep tweaking.** Ask in plain words: "make it shorter", "make the opening more engaging", "add a recap slide", "slide 4 should be a
+  comparison". Claude edits the script in the box and lists what changed. Slides you didn't ask about stay word for word the same, so
+  they aren't redesigned. Anything you type into the box by hand is picked up on the next message.
+- **Undo any change** from the card in the chat. Nothing is designed until you press **Design slides** (or **Update slides**).
+- **Change how slides look.** Once the slides are designed, ask for visual changes ("make slide 3 a flow", "more animation on the
+  stats slide"). Claude offers an **Apply to slides** button that sends it to the designer. Before the slides exist, Claude puts the
+  visual ideas in the script as `Note:` lines instead.
+- **Mix it with pasting.** Paste a structured script, open a file, or start from the example, and use the chat to improve it. The
+  conversation is remembered per module in your browser (**New chat** clears it).
+
+The chat uses your Anthropic API key. A reply costs a few cents; the panel shows the running total. The conversation and your
+script are sent to Anthropic, as when designing slides.
+
 ## Writing a script
 
 Two formats are accepted. The Studio detects which one you used.
