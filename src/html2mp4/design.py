@@ -30,7 +30,8 @@ Use plain HTML and inline SVG only.
 - Each slide's narration is a numbered list of sentences (steps 0, 1, 2...). An element that appears during the
   narration carries `data-c="N"`: it becomes visible when sentence N starts, and stays.
 - Add `data-cue="exact words"` (copied from sentence N) so the element appears when the narrator says those words. Use it
-  whenever a sentence names several things in turn ("curious, ownership, perseverance"): each one gets its own cue.
+  whenever a sentence names several things in turn ("curious, ownership, perseverance"): each one gets its own cue. When a
+  sentence brings only one element, it appears as the sentence starts (a cue on it is ignored), so the picture never lags the idea.
 - `data-d="0.3"` adds a small stagger (0 to 1 second) after the cue. Never use it to sync with speech; use data-cue.
 - The slide heading carries data-c="0". Reveal what each sentence talks about when it talks about it. Sentences that
   need no visual reveal nothing. Elements without data-c are visible from the start; only use that for quiet backdrop shapes.

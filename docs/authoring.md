@@ -74,6 +74,10 @@ earlier slides stay `on`.
 voice's real word timings in the video (the in-browser player estimates it). The words must appear in the sentence.
 `data-d` then adds a delay on top of the cue. Without `data-cue`, `data-d` is a plain delay in seconds from the start of the sentence.
 
+Cues are for sentences that name several things in turn ("easy, medium and hard"): each item appears as it is said, a quarter
+of a second early so it is readable as the word is heard. When a sentence brings only one element (or several parts that share
+one cue), the element appears as the sentence starts and the cue is ignored, so the picture never lags behind the idea.
+
 `data-d` adds a delay in seconds. It's exposed to CSS as the custom property `--d`, so a typical rule is:
 
 ```css

@@ -280,7 +280,7 @@ def basic_slide(slide):
 
 PLAYER_JS = r"""/*h2m:player-js*/
 (function(){
-  var flat = [];
+  var flat = [], LEAD = 0.25;                       // a word-timed graphic starts this early, so it is readable as the word is heard
   scenes.forEach(function(s, si){ s.chunks.forEach(function(t, ci){ flat.push([si, ci, t]); }); });
   var pos = 0, playing = false, token = 0, timers = [], rate = 1, mode = 'browser', audio = null, studio = null, cued = [], nextAudio = null, retries = 0;
   var $ = function(id){ return document.getElementById(id); };
@@ -303,15 +303,21 @@ PLAYER_JS = r"""/*h2m:player-js*/
   function dropPreload(){ if (nextAudio) { nextAudio.onerror = null; nextAudio = null; } }
 
   // ---- what is on screen at a step. live = while narrating: cued things wait for their word; otherwise they use an estimate.
+  // A sentence that brings one graphic shows it as the sentence starts. Only a sentence that names several things in turn
+  // ("easy, medium and hard") reveals each on its word. (The video follows the same rule.)
+  function listed(si, ci){                        // several different cue phrases in one sentence (two parts of one graphic sharing a cue are one thing)
+    var seen = {}; [].forEach.call(document.getElementById(scenes[si].id).querySelectorAll('[data-cue]'), function(e){ if (+e.dataset.c === ci) seen[norm(e.getAttribute('data-cue'))] = 1; });
+    return Object.keys(seen).length > 1;
+  }
   function showStep(live){
-    var si = flat[pos][0], ci = flat[pos][1], text = flat[pos][2]; cued = [];
+    var si = flat[pos][0], ci = flat[pos][1], text = flat[pos][2], many = listed(si, ci); cued = [];
     scenes.forEach(function(s, i){
       var el = document.getElementById(s.id); el.classList.toggle('active', i === si);
       el.querySelectorAll('[data-c]').forEach(function(e){
         var c = +e.dataset.c, d = parseFloat(e.getAttribute('data-d') || 0), now = i < si || (i === si && c <= ci);
-        var isCued = i === si && c === ci && e.hasAttribute('data-cue');
+        var isCued = i === si && c === ci && e.hasAttribute('data-cue') && many;
         if (live && isCued) { cued.push(e); e.classList.remove('on'); if (d) e.style.setProperty('--d', d + 's'); else e.style.removeProperty('--d'); return; }
-        if (!live && isCued) { var k = cueIndex(e, text); if (k > 0) d += Math.max(0, k * 0.4 - 0.08); }
+        if (!live && isCued) { var k = cueIndex(e, text); if (k > 0) d += Math.max(0, k * 0.4 - LEAD); }
         if (d) e.style.setProperty('--d', d + 's'); else e.style.removeProperty('--d');
         e.classList.toggle('on', now);
       });
@@ -337,7 +343,7 @@ PLAYER_JS = r"""/*h2m:player-js*/
     cued.slice().forEach(function(e){
       var k = cueIndex(e, text); e._char = k > 0 ? wordsOf(text)[k][1] : 0;
       if (k <= 0) { reveal(e); return; }
-      timers.push(setTimeout(function(){ if (token === my) reveal(e); }, Math.max(0, k * 0.42 - 0.08) / rate * 1000 * factor));
+      timers.push(setTimeout(function(){ if (token === my) reveal(e); }, Math.max(0, k * 0.42 - LEAD) / rate * 1000 * factor));
     });
   }
   function speakBrowser(my){
@@ -360,7 +366,7 @@ PLAYER_JS = r"""/*h2m:player-js*/
     a.playbackRate = rate; a.preservesPitch = a.webkitPreservesPitch = true;
     cued.forEach(function(e){
       var cue = (e.getAttribute('data-cue') || '').split(/\s+/).map(norm).filter(Boolean), at = 0;
-      for (var i = 0; i + cue.length <= words.length; i++) { var ok = true; for (var k = 0; k < cue.length; k++) if (words[i + k][0] !== cue[k]) { ok = false; break; } if (ok) { at = Math.max(0, words[i][1] - 0.08); break; } }
+      for (var i = 0; i + cue.length <= words.length; i++) { var ok = true; for (var k = 0; k < cue.length; k++) if (words[i + k][0] !== cue[k]) { ok = false; break; } if (ok) { at = Math.max(0, words[i][1] - LEAD); break; } }
       e._at = at;
     });
     a.addEventListener('playing', function(){ started = true; retries = 0; clearTimeout(watchdog); });

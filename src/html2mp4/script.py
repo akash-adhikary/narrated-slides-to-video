@@ -69,6 +69,19 @@ def parse_hold(value, n):
     if seconds > MAX_HOLD: raise ScriptError(f"Line {n}: 'Hold:' can be at most {MAX_HOLD:g} seconds.")
     return seconds
 SCENE = re.compile(r"^scene\s+(\d+)\s*[:.\-–—]\s*(.*?)\s*(?:\(([^)]*\d:\d\d[^)]*)\))?\s*$", re.I)
+NARRATION = re.compile(r"^(?:narration|narrator|voice[- ]?over|vo|script|says?)\s*:\s*(.*)$", re.I)
+QUOTES = ('"', '“', '”')
+
+
+def _unquote(text):
+    """A narration written in quotes ("Quick challenge. …") is the words without them, so it splits into sentences."""
+    t = text.strip()
+    if len(t) > 1 and t[0] in QUOTES and t[-1] in QUOTES and sum(t.count(q) for q in QUOTES) == 2: return t[1:-1].strip()
+    if t[:1] in QUOTES and sum(t.count(q) for q in QUOTES) == 1: return t[1:].strip()          # an opening quote, closed on a later line
+    if t[-1:] in QUOTES and sum(t.count(q) for q in QUOTES) == 1: return t[:-1].strip()
+    return t
+
+
 ON_SCREEN = re.compile(r"^(?:on[- ]screen(?: text)?|screen|visual)\s*:\s*(.*)$", re.I)
 ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "etc.", "mr.", "mrs.", "ms.", "dr.", "inc.", "approx.", "no.", "st.")
 
@@ -185,7 +198,10 @@ def _parse_scenes(text, title, subtitle):
         if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
             slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
         in_screen = False
-        slide.say += split_sentences(line)
+        nar = NARRATION.match(line)
+        if nar: line = nar.group(1)                                     # "Narration: …" labels what is said; it isn't said itself
+        line = _unquote(line)
+        if line: slide.say += split_sentences(line)
     if head:
         first = head[0]
         m.title = re.sub(r"^(?:one\s+)?micro-?learning\s*[:\-–—]\s*", "", first, flags=re.I).strip()

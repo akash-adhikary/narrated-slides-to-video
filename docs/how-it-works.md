@@ -64,7 +64,9 @@ Each result is saved as a version ([`projects.py`](../src/html2mp4/projects.py))
 An element with `data-cue="word"` appears when the narrator says that word. In the video, the text-to-speech engine
 reports when each word starts; those times are saved with each sentence's audio. Before rendering, the page script finds the
 cue words in the sentence and sets each element's delay (plus any `data-d`). The Studio's review player has no audio, so it
-estimates the delay at 0.4 s per word. If the words can't be found, the element appears with its sentence.
+estimates the delay at 0.4 s per word. If the words can't be found, the element appears with its sentence. Cues only take effect when a sentence has two or more
+different ones (a list said in turn); each element then starts 0.25 s before its word. A single cued element appears with its
+sentence. The video and the player apply the same rule.
 
 ### Brand kit
 

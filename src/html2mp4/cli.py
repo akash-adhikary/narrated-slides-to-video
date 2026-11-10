@@ -50,7 +50,7 @@ class Cancelled(Exception):
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 6                      # bump to invalidate cached video renders
+RENDER_VERSION = 7                      # bump to invalidate cached video renders
 
 FPS = 30
 # Output size; the stage is rendered natively at that scale (vector-sharp, never upscaled). 1440p keeps colour detail at
@@ -97,15 +97,18 @@ PAGE_JS = """
     a.currentTime = Math.max(0, (t - started.get(a)) * 1000);
   });
   const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const CUE_LEAD = 0.25;                  // a word-timed graphic starts this early, so it is readable as the word is heard
   window.__html2mp4 = {
     // data-cue="word or phrase": the element appears when the narrator says it (plus any data-d). times[scene][chunk] = [[word, t], ...]
+    // Only a sentence that names several things reveals each on its word; one graphic shows as its sentence starts (as in the page's player).
     setWordTimes: times => scenes.forEach((s, si) => items[si].forEach(e => {
       const cue = (e.getAttribute('data-cue') || '').split(/\\s+/).map(norm).filter(Boolean);
       if (!cue.length) return;
+      if (new Set(items[si].filter(x => x.hasAttribute('data-cue') && x.dataset.c === e.dataset.c).map(x => norm(x.getAttribute('data-cue')))).size < 2) return;
       const words = ((times[si] || [])[+e.dataset.c]) || [];
       let at = 0;
       for (let i = 0; i + cue.length <= words.length; i++)
-        if (cue.every((c, k) => words[i + k][0] === c)) { at = Math.max(0, words[i][1] - 0.08); break; }
+        if (cue.every((c, k) => words[i + k][0] === c)) { at = Math.max(0, words[i][1] - CUE_LEAD); break; }
       e.style.setProperty('--d', (at + parseFloat(e.getAttribute('data-d') || 0)) + 's');
     })),
     size: () => [stage.offsetWidth, stage.offsetHeight],
