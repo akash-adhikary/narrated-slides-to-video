@@ -24,21 +24,27 @@ def client(timeout=600):
         raise AIError("No Anthropic API key is set. Add one in Settings.")
 
 
-def structured(system, content, schema, effort="medium", max_tokens=32000, on_text=None):
-    """One request whose answer must match `schema`. Returns (data, usage). `on_text(text_so_far)` is called as the answer streams in."""
+def structured(system, content, schema, effort="medium", max_tokens=32000, on_text=None, on_thinking=None):
+    """One request whose answer must match `schema`. Returns (data, usage).
+
+    `on_text(text_so_far)` is called as the answer streams in, and `on_thinking(summary_so_far)` as Claude's thinking summary does
+    (the summary is what Anthropic exposes of its reasoning; it is billed the same whether or not it is shown)."""
     c = client()
     try:
         with c.beta.messages.stream(
             model=config.DESIGN_MODEL, max_tokens=max_tokens,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if isinstance(system, str) else system,
             messages=[{"role": "user", "content": content}],
+            thinking={"type": "adaptive", "display": "summarized" if on_thinking else "omitted"},
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             betas=[FALLBACK_BETA], fallbacks="default",
         ) as stream:
             so_far = ""
             for event in stream:
-                if on_text and event.type == "text":
+                if event.type == "text" and on_text:
                     so_far += event.text; on_text(so_far)
+                elif event.type == "thinking" and on_thinking:
+                    on_thinking(event.snapshot)
             msg = stream.get_final_message()
     except TypeError:          # the SDK found no credentials anywhere
         raise AIError("No Anthropic API key is set. Add one in Settings.")

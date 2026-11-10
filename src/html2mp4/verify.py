@@ -32,6 +32,7 @@ MEASURE_JS = r"""
   const over = (a, b) => ({w: Math.min(a.right, b.right) - Math.max(a.left, b.left), h: Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)});
   const label = t => t.trim().replace(/\s+/g, ' ').slice(0, 40);
   const hasBox = e => { const cs = getComputedStyle(e);
+      if (cs.backgroundClip === 'text' || cs.webkitBackgroundClip === 'text') return false;   // gradient text is a fill, not a container
       return parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none' || rgba(cs.backgroundColor)[3] > .05 || cs.backgroundImage !== 'none'; };
   const foot = slide.querySelector('.slide-foot');
 

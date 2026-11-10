@@ -76,6 +76,22 @@ def clear_api_key():
     data = load(); data.pop("anthropic_api_key", None); save(data)
 
 
+# ---------------------------------------------------------------- design quality
+
+DESIGN_EFFORTS = {"balanced": "medium", "thorough": "high"}     # how hard Claude thinks when designing slides
+
+
+def design_quality(): return load().get("design_quality", "balanced")
+
+
+def set_design_quality(value):
+    if value not in DESIGN_EFFORTS: raise ValueError("design quality must be balanced or thorough")
+    data = load(); data["design_quality"] = value; save(data)
+
+
+def design_effort(): return DESIGN_EFFORTS.get(design_quality(), "medium")
+
+
 # ---------------------------------------------------------------- glossary
 
 DEFAULT_GLOSSARY = {"pronunciations": {}, "banned": [], "approved": []}

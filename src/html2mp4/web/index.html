@@ -75,6 +75,11 @@ Note: three cards, left to right</pre>
       <div class="prog-top"><div><div class="prog-title" id="jobTitle">Designing your slides</div><div class="prog-label" id="jobLabel">Getting ready</div></div>
         <div class="pct" id="jobPct">0<small>%</small></div></div>
       <div class="bar"><i id="jobBar"></i></div>
+      <ol class="phases" id="jobPhases" aria-label="Stages">
+        <li data-p="plan">Plan</li><li data-p="write">Write</li><li data-p="check">Check</li><li data-p="fix">Fix</li><li data-p="review">Review</li>
+      </ol>
+      <div class="thinking" id="jobThinking" hidden><div class="thinking-h"><i class="pulse"></i>Claude is thinking</div><div id="jobThoughts"></div></div>
+      <details class="activity" id="jobActivityBox" open><summary>What's happening <span id="jobActivityCount"></span></summary><ol id="jobActivity"></ol></details>
       <div class="prog-foot"><span id="jobEta"></span><span>You can leave this page. It keeps working.</span></div>
     </div>
   </section>
@@ -245,6 +250,15 @@ Note: three cards, left to right</pre>
       <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a></div>
     <p class="fine">The key is stored on this computer only, in <code>~/.config/html2mp4</code>, readable only by your user account.
       When you design slides from a script, the script text is sent to Anthropic. Making videos stays entirely on this computer.</p>
+  </section>
+
+  <section class="card" aria-labelledby="hQual">
+    <div class="card-h"><h2 id="hQual">Design quality</h2><p>How much care Claude takes when designing slides</p></div>
+    <div class="seg" id="dqSeg" role="radiogroup" aria-label="Design quality">
+      <button type="button" role="radio" data-v="balanced" aria-checked="true">Balanced</button>
+      <button type="button" role="radio" data-v="thorough" aria-checked="false">Thorough</button>
+    </div>
+    <p class="fine" id="dqNote"></p>
   </section>
 
   <section class="card" aria-labelledby="hGloss">

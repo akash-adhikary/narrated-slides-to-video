@@ -50,7 +50,7 @@ The Studio opens on the **Write** page.
    how many slides it found, or what's wrong and on which line.
 2. Optional: click **Check my script** for suggestions on typos, unclear lines and risky wording. Nothing changes unless
    you accept it.
-3. Click **Design slides**. This takes 4 to 8 minutes and about $1 of Claude usage. You can leave the page.
+3. Click **Design slides**. This takes 2 to 4 minutes and about $0.60 of Claude usage, and you can watch what Claude is doing. You can leave the page.
 4. Review the slides. Step through them, and describe any change in the box underneath, for example
    "make the cards on slide 4 larger" or "at 2:51 the boxes overlap". Only the slides you name change, and every change is
    saved as a version you can go back to.

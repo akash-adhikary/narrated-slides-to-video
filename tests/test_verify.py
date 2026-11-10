@@ -66,3 +66,12 @@ def test_static_rules(html, css, expect):
 
 def test_banned_terms():
     assert verify.static_issues("s1", "<p>Career Pathing Programme</p>", "", ["Career Pathing"])
+
+
+def test_gradient_text_is_a_fill_not_a_box():
+    """Brand headings use a gradient clipped to the text. Its line height can make the text rect a few px taller than the element:
+    that is not text spilling out of a box."""
+    css = ("#s1 .g{background:linear-gradient(90deg,#fff,#04d1ff);-webkit-background-clip:text;background-clip:text;color:transparent;"
+           "line-height:1.1;letter-spacing:-0.02em;max-width:300px}")
+    found = run('<h2 class="g t-heading" data-c="0">How to Interview Candidates <br>at ThoughtSpot</h2>', css)
+    assert not any(k in ("overflow", "overlap") for k, _ in found)

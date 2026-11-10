@@ -115,7 +115,7 @@ The [architecture notes](docs/how-it-works.md) describe each stage and what the 
 | Linux | Expected to work with `./setup.sh`, but untested |
 | Windows | Not packaged yet |
 
-Designing slides needs an [Anthropic API key](https://console.anthropic.com/settings/keys) (about $1 per module). Making videos does not.
+Designing slides needs an [Anthropic API key](https://console.anthropic.com/settings/keys) (about $0.60 for a six-slide module). Making videos does not.
 
 Disk space: about 3 GB for Python, the voice model and Chromium. A 2–3 minute module takes 5–8 minutes to create at
 1440p on an M-series laptop.

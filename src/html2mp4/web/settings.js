@@ -219,3 +219,19 @@ pageHooks.settings = async () => {
   await loadSettings();
   const g = await api("/api/settings/glossary"); gloss.pron = g.pronunciations; renderPron(); $("#glBanned").value = (g.banned || []).join("\n");
 };
+
+
+/* ---------- design quality ---------- */
+const DQ_NOTES = {balanced: "Recommended. About 2 to 3 minutes and $0.60 for a six-slide module. Clean, consistent slides that pass every check.",
+                  thorough: "Claude takes more care over each layout and illustration. About 4 minutes and $0.90 for a six-slide module."};
+function showQuality(v){
+  document.querySelectorAll("#dqSeg button").forEach(b => b.setAttribute("aria-checked", b.dataset.v === v));
+  $("#dqNote").textContent = DQ_NOTES[v];
+}
+document.querySelectorAll("#dqSeg button").forEach(b => b.addEventListener("click", async () => {
+  showQuality(b.dataset.v);
+  try{ await api("/api/settings/design-quality", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: b.dataset.v})}); }
+  catch(err){ toast(err.message); }
+}));
+const loadWithGloss = pageHooks.settings;
+pageHooks.settings = async () => { await loadWithGloss(); showQuality((await api("/api/settings")).design_quality); };

@@ -1,5 +1,6 @@
 // The Write page: a script becomes slides, you review and refine them, then hand them to the video page.
-const W = {project: null, outline: null, parseTimer: null, jobTimer: null, current: null, keySet: false};
+const W = {project: null, outline: null, parseTimer: null, jobTimer: null, current: null, keySet: false, quality: "balanced"};
+const COST_HINT = {balanced: "Usually 2 to 4 minutes and about $0.60 in Claude usage.", thorough: "Usually 4 to 5 minutes and about $0.90 in Claude usage."};
 const KINDS = {typo: "Typo", clarity: "Clearer wording", risk: "Careful wording", pronounce: "Pronunciation"};
 const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const slideName = id => id === "s0" ? "Title slide" : id ? `Slide ${id.slice(1)}` : "Module";
@@ -33,7 +34,7 @@ function updateButtons(){
   $("#wNew").hidden = !W.project;
   $("#wDesignText").textContent = !W.project ? "Design slides" : W.mode === "basic" ? "Design with Claude" : "Update slides";
   $("#wCostHint").innerHTML = !W.keySet ? `Designing needs an API key. <a href="#settings">Add one in Settings</a>.`
-    : W.project ? "Only the slides you changed are redesigned." : "Usually 4 to 8 minutes and about $1 in Claude usage.";
+    : W.project ? "Only the slides you changed are redesigned." : COST_HINT[W.quality];
 }
 $("#wExample").addEventListener("click", async () => { box.value = (await api("/api/write/example")).script; draft.set(box.value); parseNow(); });
 $("#wFile").addEventListener("change", e => {
@@ -93,6 +94,23 @@ $("#wDesign").addEventListener("click", () => {
 });
 $("#wBasic").addEventListener("click", () => startJob(post("/api/write/generate", {script: box.value, mode: "basic"})));
 
+const PHASES = ["plan", "write", "check", "fix", "review"];
+function renderPhases(phase){
+  const at = PHASES.indexOf(phase);
+  document.querySelectorAll("#jobPhases li").forEach((li, i) => { li.classList.toggle("done", at > i || phase === "done"); li.classList.toggle("on", at === i); });
+}
+function renderThoughts(list){
+  $("#jobThinking").hidden = !list.length;
+  $("#jobThoughts").innerHTML = list.map(t => `<div class="thought">${list.length > 1 ? `<b>${esc(t.label)}</b> ` : ""}${esc(t.text.replace(/\s+/g, " ").replace(/^\S*\s/, "…"))}</div>`).join("");
+}
+function renderActivity(list){
+  const box = $("#jobActivity"), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const mmss = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  box.innerHTML = list.map(e => `<li class="${e.kind}"><time>${mmss(e.t)}</time><span>${esc(e.text)}</span></li>`).join("");
+  $("#jobActivityCount").textContent = list.length ? `· ${list.length}` : "";
+  if(atEnd) box.scrollTop = box.scrollHeight;
+}
+
 function trackJob(job, project){
   $("#cardJob").hidden = false; W.busy = true; updateButtons();
   $("#cardJob").scrollIntoView({behavior: "smooth", block: "center"});
@@ -102,7 +120,9 @@ function trackJob(job, project){
     const p = Math.round(j.progress * 100);
     $("#jobPct").innerHTML = `${p}<small>%</small>`; $("#jobBar").style.width = Math.max(2, p) + "%";
     $("#jobLabel").textContent = j.status === "queued" ? "Waiting for the previous design to finish" : j.label;
-    $("#jobEta").textContent = j.eta ? (j.eta < 20 ? "Almost there…" : `About ${fmt(j.eta)} left`) : "";
+    $("#jobEta").textContent = j.status === "queued" ? "" : j.eta ? (j.eta < 20 ? "Almost there…" : `About ${fmt(j.eta)} left`)
+      : j.phase === "plan" ? "Claude plans every layout before writing. This usually takes 1 to 3 minutes." : "";
+    renderPhases(j.phase); renderThoughts(j.thoughts); renderActivity(j.activity);
     if(j.status === "done" || j.status === "failed"){
       clearInterval(W.jobTimer); W.busy = false; $("#cardJob").hidden = true;
       if(j.status === "failed") toast(j.error || "The design failed");
@@ -196,10 +216,10 @@ $("#modList").addEventListener("click", async e => {
 
 /* ---------- start ---------- */
 pageHooks.write = async () => {
-  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); updateButtons(); loadModules();
+  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced"; updateButtons(); loadModules();
 };
 (async () => {
-  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set);
+  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced";
   const active = await api("/api/write/active").catch(() => []);
   if(active.length){ trackJob(active[0], active[0].project); await openProject(active[0].project).catch(() => {}); }
   else{

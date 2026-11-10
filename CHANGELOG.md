@@ -21,9 +21,24 @@ All notable changes to this project are documented here. The format follows
   banned terms, and a **Settings** page for the Anthropic API key.
 - `html2mp4-script` command, a project store under `~/Downloads/Narrated Videos/Modules`, and a pytest suite.
 
+- **Live view of a design in progress**: the stage (Plan, Write, Check, Fix, Review), Claude's thinking summary as it streams,
+  and a timestamped feed of what's happening, including each slide's layout plan and every problem the checker finds.
+  Time left is shown only once it can be estimated.
+- **Design quality** setting: Balanced (the default) or Thorough.
+
 ### Changed
+- **Designs are about 3× faster and cheaper** (a six-slide module: 8.4 min and $1.13 down to 2.6 min and $0.68): the first two
+  slides are designed first to set the look, the rest side by side to match it; slides with problems are fixed side by side;
+  a worked example in the prompt reduces first-pass mistakes; brand and reference are cached for an hour; mechanical fixes use
+  a lower thinking effort; and Balanced design uses medium effort, which matched high effort in quality.
+- Capitalisation, punctuation and label conventions are shared by every slide; a review problem about the whole module is fixed
+  on every slide.
 - The Studio opens on the Write page. The front end is split into separate files.
 - Pronunciations change what the voice says without changing captions or slides.
+
+### Fixed
+- The layout checker no longer treats gradient-filled headings as boxes their own text must fit inside. That false alarm sent every
+  slide through an extra fix round.
 
 ## [0.3.0] - 2026-10-13
 

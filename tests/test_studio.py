@@ -95,3 +95,29 @@ def test_earlier_feedback_is_carried_into_later_changes():
     assert "remove the HR line (slides s6)" in note and "use larger cards" in note
     assert "unrelated to s2" not in note and "the new request" not in note
     assert studio.history_note({"feedback": []}, None, "x") == ""
+
+
+def test_design_quality_endpoint(client):
+    assert client.get("/api/settings").json()["design_quality"] == "balanced"
+    assert client.put("/api/settings/design-quality", json={"value": "thorough"}).json() == {"design_quality": "thorough"}
+    assert client.get("/api/settings").json()["design_quality"] == "thorough"
+    assert client.put("/api/settings/design-quality", json={"value": "x"}).status_code == 400
+
+
+def test_phase_and_eta_follow_the_stage_a_design_is_in():
+    assert studio.phase_of("Designing the slides: planning the layouts") == "plan"
+    assert studio.phase_of("Designing the slides (3 of 6 written)") == "write"
+    assert studio.phase_of("Checking every slide, step by step") == "check"
+    assert studio.phase_of("Fixing the slides (1 of 2 fixed)") == "fix"
+    assert studio.eta_for({"phase": "plan", "label": "x"}) is None                    # nothing measurable while Claude plans: no invented number
+    assert studio.eta_for({"phase": "write", "label": "Designing the slides (2 of 6 written)"}) == 4 * 12 + 90
+    assert studio.eta_for({"phase": "review", "label": "Reviewing the design"}) == 30
+
+
+def test_a_design_job_exposes_activity_and_live_thoughts(client):
+    job = studio.design_jobs["j"] = {"id": "j", "project": "p", "status": "running", "progress": 0.3, "label": "Designing the slides (2 of 6 written)",
+                                     "phase": "write", "created": 0, "started": 0, "activity": [{"t": 1, "kind": "plan", "text": "hello"}] * 100,
+                                     "thoughts": {"a": {"label": "slides 1–2", "text": "weighing the heading", "at": 2}, "b": {"label": "slide 3", "text": "", "at": 1}}}
+    j = client.get("/api/write/jobs/j").json()
+    assert len(j["activity"]) == 80 and j["phase"] == "write" and j["eta"] == 4 * 12 + 90
+    assert [t["label"] for t in j["thoughts"]] == ["slide 3", "slides 1–2"]

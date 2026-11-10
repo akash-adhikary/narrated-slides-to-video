@@ -73,11 +73,25 @@ unless you accept it:
 ## Designing the slides
 
 **Design slides** sends your script, your brand kit and the design rules to Claude. A six-slide module typically takes
-4 to 8 minutes and about $1 of Claude usage. You can leave the page while it works.
+2 to 4 minutes and about $0.60 of Claude usage. You can leave the page while it works.
 
 Claude designs each slide as HTML and CSS using a small kit of building blocks, and decides what appears with which
 sentence. For sentences that name several things in turn, each item appears on the word that names it
 ("curious… ownership… perseverance"). This uses the voice's real word timings in the video.
+
+### What you see while it works
+
+The progress card shows the stage (Plan, Write, Check, Fix, Review) and three live views of what Claude is doing:
+
+- **Claude is thinking** shows a running summary of its reasoning, such as how it's sizing the cards or how it plans to
+  handle a quote. It is a summary written by Claude, not a transcript.
+- **What's happening** lists each step with a time: which slide Claude has started and how it plans to lay it out, what the
+  checker found (the actual problems, in plain words), which slides are being fixed, and what the design review said.
+- **Time left** is only shown once it can be estimated. While Claude is planning the layouts (usually 1 to 3 minutes) nothing
+  can be measured, so the card says so rather than guessing.
+
+**Design quality** in Settings chooses how much care Claude takes. *Balanced* (the default) takes 2 to 4 minutes for six slides
+and costs about $0.60. *Thorough* takes 4 to 5 minutes and about $0.90, and tends to add more illustration and detail.
 
 ### The checker
 

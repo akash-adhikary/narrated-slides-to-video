@@ -46,7 +46,7 @@ A line doesn't start with a marker. In the Say/Show format, lines begin with `Sa
 [From script to slides](scripts.md#writing-a-script).
 
 **The design takes a long time.**
-A six-slide module usually takes 4 to 8 minutes: most of it is Claude composing the layouts. It carries on if you leave
+A six-slide module usually takes 2 to 4 minutes (4 to 5 with *Thorough* design quality): most of it is Claude composing the layouts. It carries on if you leave
 the page. If it stays stuck, check your internet connection.
 
 **The checker still lists a problem after the fix rounds.**

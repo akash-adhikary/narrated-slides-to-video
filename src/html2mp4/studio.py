@@ -341,7 +341,15 @@ def verify_key(key=None):
 
 @app.get("/api/settings")
 def get_settings():
-    return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.available_fonts()}
+    return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.available_fonts(),
+            "design_quality": config.design_quality()}
+
+
+@app.put("/api/settings/design-quality")
+def put_design_quality(body: dict):
+    try: config.set_design_quality(body.get("value", ""))
+    except ValueError as e: raise HTTPException(400, str(e))
+    return {"design_quality": config.design_quality()}
 
 
 class KeyIn(BaseModel):
@@ -494,9 +502,29 @@ def history_note(p, only, current_feedback):
             + "\n".join(f"- {f['text']}" + (f" (slides {', '.join(f['scope'])})" if isinstance(f["scope"], list) and f["scope"] else "") for f in keep[-8:]))
 
 
+def phase_of(label):
+    """Which stage of a design a progress label belongs to: plan, write, check, fix or review."""
+    for key, phase in (("Checking", "check"), ("Fixing", "fix"), ("Reviewing", "review"), ("Applying", "plan"), ("planning", "plan"),
+                       ("written", "write"), ("Designing", "write"), ("Done", "done")):
+        if key in label: return phase
+    return "plan"
+
+
+def eta_for(job):
+    """A rough time left, from the stage a design is in (nothing can be measured while Claude is planning, so no number is guessed)."""
+    phase, label = job.get("phase", "plan"), job.get("label", "")
+    m = re.search(r"\((\d+) of (\d+)", label)
+    left = (int(m.group(2)) - int(m.group(1))) if m else 0
+    return {"plan": None, "write": left * 12 + 90, "check": 75, "fix": 60, "review": 30}.get(phase)
+
+
 def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
     """Design, revise or just re-check slides in the background, then save the result as a new version."""
-    def progress(f, label): job.update(progress=round(f, 3), label=label)
+    def progress(f, label): job.update(progress=round(f, 3), label=label, phase=phase_of(label))
+    def activity(kind, text): job["activity"].append({"t": round(time.time() - job["started"], 1), "kind": kind, "text": text})
+    def thought(key, label, text):
+        if text: job["thoughts"][key] = {"label": label, "text": text, "at": time.time()}
+        else: job["thoughts"].pop(key, None)
     with design_lock:
         job.update(status="running", started=time.time(), label="Getting ready")
         try:
@@ -513,6 +541,7 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
                 job.update(status="done", progress=1.0, label="Done", cost=0)
                 return
             res = design.design(m, brand, reference=ref, previous=prev, only=only, feedback=feedback, progress=progress,
+                                activity=activity, thought=thought, effort={"design": config.design_effort()},
                                 timing_note=(moment_note(m) + "\n" + history_note(p, only, feedback)).strip() if feedback else "")
             problems = [i for i in res["issues"] if i.kind != "invented"] + [i for i in res["issues"] if i.kind == "invented"]
             projects.save_version(project_id, res["html"], res["slides"], note, cost=res["cost"], issues=problems)
@@ -525,7 +554,8 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
 
 def start_design(project_id, **kw):
     jid = uuid.uuid4().hex[:10]
-    job = design_jobs[jid] = {"id": jid, "project": project_id, "status": "queued", "progress": 0.0, "label": "Waiting to start", "created": time.time()}
+    job = design_jobs[jid] = {"id": jid, "project": project_id, "status": "queued", "progress": 0.0, "label": "Waiting to start", "created": time.time(),
+                              "phase": "plan", "activity": [], "thoughts": {}}
     threading.Thread(target=run_design, args=(job, project_id), kwargs=kw, daemon=True).start()
     return job
 
@@ -547,9 +577,11 @@ def write_generate(body: GenerateIn):
 @app.get("/api/write/jobs/{jid}")
 def write_job(jid: str):
     if jid not in design_jobs: raise HTTPException(404)
-    j = dict(design_jobs[jid])
-    if j["status"] == "running" and j["progress"] > 0.06:
-        j["eta"] = max(5, (time.time() - j["started"]) * (1 - j["progress"]) / j["progress"])
+    job = design_jobs[jid]
+    j = dict(job)
+    j["activity"] = list(job["activity"])[-80:]                                       # snapshots: calls run side by side and keep adding
+    j["thoughts"] = sorted((dict(v) for v in list(job["thoughts"].values())), key=lambda v: v["at"])[-3:]
+    if j["status"] == "running": j["eta"] = eta_for(job)
     return j
 
 
