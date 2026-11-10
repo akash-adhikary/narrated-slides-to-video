@@ -7,6 +7,7 @@
     ## Why feedback matters                <- a slide
     Show: Builds trust · Speeds growth     <- optional on-screen points (or "- point" lines)
     Note: use three icons                  <- optional design hint for the slide designer
+    Hold: 3                                <- optional: seconds the finished slide stays up after its last sentence
     Say: Feedback is how teams get better. <- one narration step; elements can appear with it
     Say: Done well, it builds trust.
 
@@ -37,6 +38,7 @@ class Slide:
     note: str = ""                                          # a design hint
     screen: str = ""                                        # the author's description of what appears ("On screen:")
     timing: str = ""                                        # the author's intended window, e.g. "0:30 to 1:30"
+    hold: float | None = None                               # extra seconds the finished slide stays up (None: the Studio's pacing setting)
 
 
 @dataclasses.dataclass
@@ -55,7 +57,17 @@ class Module:
     def to_dict(self): return dataclasses.asdict(self)
 
 
-MARKER = re.compile(r"^(title|subtitle|say|show|note)\s*:\s*(.*)$", re.I)
+MARKER = re.compile(r"^(title|subtitle|say|show|note|hold)\s*:\s*(.*)$", re.I)
+MAX_HOLD = 30.0
+
+
+def parse_hold(value, n):
+    """'Hold: 3', '3s' or '2.5 seconds' -> seconds."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds)?", value.strip(), re.I)
+    if not m: raise ScriptError(f"Line {n}: 'Hold:' needs a number of seconds, like 'Hold: 3'.")
+    seconds = float(m.group(1))
+    if seconds > MAX_HOLD: raise ScriptError(f"Line {n}: 'Hold:' can be at most {MAX_HOLD:g} seconds.")
+    return seconds
 SCENE = re.compile(r"^scene\s+(\d+)\s*[:.\-–—]\s*(.*?)\s*(?:\(([^)]*\d:\d\d[^)]*)\))?\s*$", re.I)
 ON_SCREEN = re.compile(r"^(?:on[- ]screen(?: text)?|screen|visual)\s*:\s*(.*)$", re.I)
 ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "etc.", "mr.", "mrs.", "ms.", "dr.", "inc.", "approx.", "no.", "st.")
@@ -119,7 +131,9 @@ def parse(text, title=None, subtitle=None):
                 if not value: raise ScriptError(f"Line {n}: 'Say:' has no text.")
                 (slide.say if slide else m.intro).append(value); last = ("say", slide); continue
             if slide is None: raise ScriptError(f"Line {n}: '{kind.title()}:' belongs under a '## Slide title'.")
-            if kind == "show":
+            if kind == "hold":
+                slide.hold = parse_hold(value, n); last = None
+            elif kind == "show":
                 slide.show += [p for p in SPLIT_SHOW.split(value) if p]; last = ("show", slide)
             else:
                 slide.note = (slide.note + " " + value).strip(); last = ("note", slide)
@@ -166,6 +180,8 @@ def _parse_scenes(text, title, subtitle):
         mk = MARKER.match(line)
         if mk and mk.group(1).lower() == "note":
             slide.note = (slide.note + " " + mk.group(2)).strip(); in_screen = False; continue
+        if mk and mk.group(1).lower() == "hold":
+            slide.hold = parse_hold(mk.group(2), n); in_screen = False; continue
         if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
             slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
         in_screen = False

@@ -329,7 +329,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
 
   // ---- narrating
   function after(my){
-    var next = flat[pos + 1], gap = 450 + (next && next[0] !== flat[pos][0] ? 700 : 0);
+    var next = flat[pos + 1], leaving = next && next[0] !== flat[pos][0], h = scenes[flat[pos][0]].hold;
+    var gap = 450 + (leaving ? 700 + 1000 * (h != null ? h : (window.__h2mHold || 0)) : 0);     // a slide's own Hold: wins over the Studio's pacing
     timers.push(setTimeout(function(){ if (token !== my || !playing) return; if (pos >= flat.length - 1) { pause(); return; } pos++; playStep(); }, gap / rate));
   }
   function armEstimate(text, my, factor){        // when no word timing is available: appear after about 0.42 s per word
@@ -531,11 +532,22 @@ PLAYER_PARTS = (re.compile(r"<!--h2m:bar-->.*?<!--/h2m:bar-->\n?", re.S), re.com
                 re.compile(r"/\*h2m:player-js\*/.*?/\*h2m:end\*/", re.S))
 
 
+HOLD_RE = re.compile(r'<script id="h2m-hold">.*?</script>\n?', re.S)
+
+
+def with_hold(page, seconds):
+    """Tell the page's player how long to hold every finished slide, from the Studio's pacing setting (a slide's own Hold: still wins).
+    Applied when the page is shown or downloaded, so changing the setting needs no redesign."""
+    page = HOLD_RE.sub("", page)
+    if not seconds or "</head>" not in page: return page
+    return page.replace("</head>", f'<script id="h2m-hold">window.__h2mHold={float(seconds):g};</script>\n</head>', 1)
+
+
 def fingerprint(page):
     """A hash of the page without its project block, its font links or its player, so a file can tell whether it was edited after the
     Studio made it (and still match after fonts are embedded for download or the player is brought up to date)."""
     import hashlib
-    page = FONTS_RE.sub("", PROJECT_RE.sub(r"\1\3", page))
+    page = HOLD_RE.sub("", FONTS_RE.sub("", PROJECT_RE.sub(r"\1\3", page)))
     for part in PLAYER_PARTS: page = part.sub("", page)
     return hashlib.sha256(page.encode()).hexdigest()
 
@@ -593,7 +605,8 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
                         f'{_footer(brand, i, total)}</section>')
     chunks = ([module.intro] if module.intro else []) + [s.say for s in module.slides]
     # narration verbatim; JSON-encoded, with "</" escaped so it can't end the script block
-    scene_js = ",\n".join(f"  {{id:'{sid}', chunks:{json.dumps(c, ensure_ascii=False)}}}" for sid, c in zip(ids, chunks))
+    holds = ([None] if module.intro else []) + [s.hold for s in module.slides]
+    scene_js = ",\n".join(f"  {{id:'{sid}', {f'hold:{h:g}, ' if h is not None else ''}chunks:{json.dumps(c, ensure_ascii=False)}}}" for sid, c, h in zip(ids, chunks, holds))
     scene_js = scene_js.replace("</", "<\\/")
     source = json.dumps(module.to_dict(), ensure_ascii=False).replace("</", "<\\/")
     faces, covered = font_faces(brand)

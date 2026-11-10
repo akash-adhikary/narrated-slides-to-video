@@ -74,7 +74,22 @@ Our leaders told us that strong candidates share several traits. They're curious
 - **`On screen:`** says what should be shown. Text in quotes is used word for word. Anything else is a description
   that Claude turns into short labels.
 - **`Note:`** is an optional design hint, such as `Note: three cards, left to right`.
+- **`Hold:`** is optional timing, such as `Hold: 3`: see [Time on each slide](#time-on-each-slide).
 - The time in brackets is your intended timing. It isn't enforced; it only helps when you refer to a moment in feedback.
+
+### Time on each slide
+
+After a slide's last sentence the finished slide stays up briefly, then the next one appears. If the last graphic goes by too
+quickly, give it more time in either of two ways:
+
+- **For one slide**, add a `Hold:` line under its heading: `Hold: 3` keeps the finished slide up 3 seconds longer (0 to 30;
+  `Hold: 0` means no extra time). It applies to the preview player and to the video. Because it is only timing, changing it
+  never redesigns anything and doesn't use Claude. You can ask the assistant: "give slide 4 more time at the end".
+- **For every slide**, choose **Settings > Pacing**: Standard, Comfortable (about 1.5 seconds more) or Relaxed (about 3 seconds
+  more). It applies to the preview player, downloads and new videos, with no redesign. A slide's own `Hold:` wins over it.
+
+If the graphic would simply be better appearing earlier in the sentence, that is a change to how the slide looks: ask for it in the
+chat or in "Ask for a change".
 
 ### Say / Show
 

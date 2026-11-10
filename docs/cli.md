@@ -31,6 +31,7 @@ Writes `MODULE.mp4` next to the input, with `MODULE.srt` and `MODULE.vtt` captio
 | `--quality Q` | `1440p` | `1440p` (2560×1440) or `1080p` (1920×1080). |
 | `--preview SECONDS` | | Render only the opening SECONDS, with a faster encode, to audition settings. |
 | `--scenes N` | all | Render only the first N slides. |
+| `--hold SECONDS` | `0` | Extra seconds each finished slide stays up before the next. A slide's own `Hold:` line wins. |
 | `--workers N` | half the CPU cores | Parallel frame renderers. |
 
 Examples:

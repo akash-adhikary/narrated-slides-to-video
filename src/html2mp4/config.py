@@ -116,9 +116,21 @@ def design_effort(): return DESIGN_EFFORTS.get(design_quality(), "medium")
 # ---------------------------------------------------------------- motion
 
 MOTIONS = ("lively", "calm")
+HOLDS = {"standard": 0.0, "comfortable": 1.5, "relaxed": 3.0}     # extra seconds a finished slide stays up before the next one
 
 
 def motion(): return load().get("motion", "lively")
+
+
+def hold(): return load().get("hold", "standard") if load().get("hold") in HOLDS else "standard"
+
+
+def hold_seconds(): return HOLDS[hold()]
+
+
+def set_hold(value):
+    if value not in HOLDS: raise ValueError("hold must be standard, comfortable or relaxed")
+    data = load(); data["hold"] = value; save(data)
 
 
 def set_motion(value):

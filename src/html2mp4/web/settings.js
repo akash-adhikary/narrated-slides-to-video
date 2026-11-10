@@ -245,5 +245,18 @@ document.querySelectorAll("#mvSeg button").forEach(b => b.addEventListener("clic
   try{ await api("/api/settings/motion", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: b.dataset.v})}); toast("Applies to slides you design from now on"); }
   catch(err){ toast(err.message); }
 }));
+/* ---------- pacing ---------- */
+const HD_NOTES = {standard: "About a second and a half after the last sentence of each slide, then the next slide appears.",
+                  comfortable: "About 1.5 seconds longer on every slide, so the last graphic can be taken in before the slide changes.",
+                  relaxed: "About 3 seconds longer on every slide. For dense slides, or viewers who like to read the screen."};
+function showHold(v){
+  document.querySelectorAll("#hdSeg button").forEach(b => b.setAttribute("aria-checked", b.dataset.v === v));
+  $("#hdNote").textContent = HD_NOTES[v] + " Applies to the preview player and to new videos. A slide's own \u201cHold:\u201d line in the script wins.";
+}
+document.querySelectorAll("#hdSeg button").forEach(b => b.addEventListener("click", async () => {
+  showHold(b.dataset.v);
+  try{ await api("/api/settings/hold", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: b.dataset.v})}); toast("Saved. It applies from now on, no redesign needed."); }
+  catch(err){ toast(err.message); }
+}));
 const loadWithGloss = pageHooks.settings;
-pageHooks.settings = async () => { await loadWithGloss(); const s = await api("/api/settings"); showQuality(s.design_quality); showMotion(s.motion || "lively"); };
+pageHooks.settings = async () => { await loadWithGloss(); const s = await api("/api/settings"); showQuality(s.design_quality); showMotion(s.motion || "lively"); showHold(s.hold || "standard"); };

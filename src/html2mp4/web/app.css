@@ -640,3 +640,4 @@ body[data-page="write"] .ai{display:block}
   @media (max-width:720px){.cmp-body{grid-template-columns:1fr}.cmp-body section+section{border-left:0;border-top:1px solid var(--line)}}
   .share-menu .vname button{width:auto;flex:none;display:inline-block;padding:6px 14px;border:1px solid var(--line);background:var(--surface);border-radius:8px;font-size:13.5px}
   .share-menu .vname button:hover{background:var(--line-2)}
+  .ai-card .tag.timing{background:var(--accent-soft);color:var(--accent-ink)}

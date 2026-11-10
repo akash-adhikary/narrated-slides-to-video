@@ -107,7 +107,8 @@ def worker(lane):
                               music_volume=job.get("music_volume", "balanced"), quality=job.get("quality", "1440p"),
                               preview_seconds=PREVIEW_SECONDS if preview else None, progress=progress,
                               cancel=cancels.setdefault(jid, threading.Event()),
-                              nice=0 if preview else 10, pausable=not preview)   # full videos yield to previews
+                              nice=0 if preview else 10, pausable=not preview,   # full videos yield to previews
+                              hold=config.hold_seconds())
             job.update(status="done", progress=1.0, label="Done", finished=time.time(),
                        duration=res["duration"], files={k: str(res[k]) for k in ("mp4", "srt", "vtt")})
         except cli.Cancelled:
@@ -342,7 +343,15 @@ def verify_key(key=None):
 @app.get("/api/settings")
 def get_settings():
     return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.available_fonts(),
-            "design_quality": config.design_quality(), "motion": config.motion()}
+            "design_quality": config.design_quality(), "motion": config.motion(), "hold": config.hold()}
+
+
+@app.put("/api/settings/hold")
+def put_hold(body: dict):
+    """How long a finished slide stays up before the next one (standard, comfortable or relaxed)."""
+    try: config.set_hold(body.get("value", ""))
+    except ValueError as e: raise HTTPException(400, str(e))
+    return {"hold": config.hold()}
 
 
 @app.put("/api/settings/motion")
@@ -585,6 +594,13 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design", 
             ref = brandkit.reference_file().read_text() if brandkit.reference_file().exists() else None
             prev = projects.slides(project_id) if p["versions"] else {}
             if remap is not None: prev = {new: remap_design(prev[old], old, new) for new, old in remap.items() if old in prev}   # reuse designs after slides moved
+            if mode == "reassemble":                      # nothing a slide shows changed (title, timing, order): put the page together again, no Claude
+                job.update(progress=0.3, label="Checking every slide, step by step")
+                page, found, _ = design._check(m, brand, prev, config.glossary()["banned"], config.motion(), p["script"], config.glossary())
+                if not page: raise script.ScriptError("Some slides have no saved design to reuse: " + "; ".join(i.message for i in found[:2]))
+                projects.save_version(project_id, page, prev, note or "Script edited", issues=found)
+                job.update(status="done", progress=1.0, label="Done", cost=0)
+                return
             if mode == "basic":
                 page = compose.basic_module(m, brand, motion=config.motion(), script_text=p["script"])
                 job.update(progress=0.3, label="Checking every slide, step by step")
@@ -732,7 +748,7 @@ def project_module(pid: str, v: int | None = None):
     if not p: raise HTTPException(404)
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
-    return HTMLResponse(compose.refresh_player(page), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(compose.with_hold(compose.refresh_player(page), config.hold_seconds()), headers={"Cache-Control": "no-store"})
 
 
 def attachment(filename):
@@ -751,7 +767,7 @@ def download_module(pid: str, v: int | None = None):
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
     name = re.sub(r'[^\w\-· ]+', "", p["name"]).strip() or "module"
-    return HTMLResponse(compose.embed_fonts(compose.refresh_player(page)), headers={"Content-Disposition": attachment(f"{name}.html"), "Cache-Control": "no-store"})
+    return HTMLResponse(compose.embed_fonts(compose.with_hold(compose.refresh_player(page), config.hold_seconds())), headers={"Content-Disposition": attachment(f"{name}.html"), "Cache-Control": "no-store"})
 
 
 @app.post("/api/projects/import")
@@ -975,6 +991,8 @@ def update_script(pid: str, body: ScriptIn):
     last_mode = p["versions"][-1].get("mode", "design")
     if last_mode == "basic":
         return {"job": start_design(pid, mode="basic", note="Script edited"), "changed": ids}
+    if not ids:                                                            # only the title, a Hold: or the order changed: no slide needs redesigning
+        return {"job": start_design(pid, mode="reassemble", remap=remap, note="Script edited (no slide redesigned)"), "changed": []}
     return {"job": start_design(pid, only=ids or None, feedback=edit_note(old, body.script, ids, remap), remap=remap,
                                 note=f"Script edited ({len(ids)} slide{'s' if len(ids) != 1 else ''} redesigned)"), "changed": ids}
 
@@ -1002,6 +1020,8 @@ def apply_changes(pid: str, body: ApplyIn):
     if text != old: projects.set_script(pid, text)
     if last_mode == "basic" and not reqs:
         return {"job": start_design(pid, mode="basic", note="Script edited"), "changed": ids} if text != old else {"job": None, "changed": []}
+    if not reqs and not ids and text != old:                              # nothing a slide shows changed (a Hold:, the title, the order)
+        return {"job": start_design(pid, mode="reassemble", remap=remap, note="Assistant: timing or order only"), "changed": []}
     scoped = sorted({i for r in reqs for i in r["slides"]}, key=lambda x: int(x[1:]))
     whole = any(not r["slides"] for r in reqs)
     only = None if whole else sorted(set(ids) | set(scoped), key=lambda x: int(x[1:]))

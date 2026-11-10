@@ -141,9 +141,9 @@ def load_scenes(html_text):
     if not m: raise ConversionError("This file doesn't contain a narration script, so it isn't a narrated slide module. "
                                     "Check you picked the right file (technical detail: no `var scenes = [...]` list).")
     scenes = []
-    for s in re.finditer(r"\{\s*id\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*chunks\s*:\s*\[(.*?)\]\s*\}", m.group(1), re.S):
-        chunks = [json.loads('"' + c + '"') for c in re.findall(r'"((?:[^"\\]|\\.)*)"', s.group(2))]
-        scenes.append({"id": s.group(1), "chunks": chunks})
+    for s in re.finditer(r"\{\s*id\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*(?:hold\s*:\s*([\d.]+)\s*,\s*)?chunks\s*:\s*\[(.*?)\]\s*\}", m.group(1), re.S):
+        chunks = [json.loads('"' + c + '"') for c in re.findall(r'"((?:[^"\\]|\\.)*)"', s.group(3))]
+        scenes.append({"id": s.group(1), "chunks": chunks, **({"hold": float(s.group(2))} if s.group(2) else {})})
     if not scenes or not any(s["chunks"] for s in scenes):
         raise ConversionError("The narration script in this file is empty.")
     missing = [s["id"] for s in scenes if f'id="{s["id"]}"' not in html_text and f"id='{s['id']}'" not in html_text]
@@ -287,7 +287,8 @@ def measure_spans(html, ids, times=None):
 
 # ---------------------------------------------------------------- timeline
 
-def build_timeline(scenes, audio, spans):
+def build_timeline(scenes, audio, spans, hold=0.0):
+    """`hold`: extra seconds each finished slide stays up (a slide's own `hold` wins), so the last graphic can be taken in."""
     t, events, clips = PRE_ROLL, [], []
     for si, sc in enumerate(scenes):
         if si: t += SCENE_GAP
@@ -299,7 +300,7 @@ def build_timeline(scenes, audio, spans):
             clips.append((t, a, text))
             visual_end = max(visual_end, ev + spans[si].get(str(ci), 0) + SETTLE_HOLD)
             t += len(a) / TTS_SR + CHUNK_GAP
-        t = max(t, visual_end)
+        t = max(t, visual_end) + float(sc.get("hold", hold))
     return events, clips, t - CHUNK_GAP + END_HOLD + FADE_OUT
 
 
@@ -511,14 +512,15 @@ STEPS = [("voice", "Recording the voiceover", 0.14), ("layout", "Timing the anim
 
 def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", music_volume="balanced",
             scenes_limit=None, workers=None, progress=None, quality="1440p", preview_seconds=None, cancel=None,
-            nice=0, pausable=False):
+            nice=0, pausable=False, hold=0.0):
     """Convert one module. `progress(fraction, label)` is called as work advances. Returns a summary dict.
 
     music_volume: "subtle" | "balanced" | "present", or dB under the voice while it speaks.
     preview_seconds: render only the opening N seconds (quicker encode), for trying out settings.
     cancel: a threading.Event; when set, the conversion stops at the next sentence or frame and raises Cancelled.
     nice: run the frame renderers at lower OS priority (e.g. 10) so they don't starve interactive work.
-    pausable: let RENDER_PAUSE hold this render's frame workers (used for full videos while a preview is made)."""
+    pausable: let RENDER_PAUSE hold this render's frame workers (used for full videos while a preview is made).
+    hold: extra seconds every finished slide stays up before the next (a slide's own `Hold:` line wins)."""
     if quality not in QUALITIES: raise ConversionError(f"Unknown quality '{quality}' — use {', '.join(QUALITIES)}.")
     music_level = MUSIC_VOLUMES[music_volume] if music_volume in MUSIC_VOLUMES else float(music_volume)
     html = pathlib.Path(html).resolve()
@@ -561,7 +563,7 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
         audio = synthesize(subset, voice, speed, tts_cache, voice_progress, pron, timings=cued)
         times = word_times(subset, voice, speed, tts_cache, pron) if cued else None
         spans = measure_spans(html, [s["id"] for s in subset], times)
-        return build_timeline(subset, audio, spans)
+        return build_timeline(subset, audio, spans, hold)
 
     if preview_seconds:      # narrate only as many scenes as the preview needs
         for n in range(1, len(scenes) + 1):
@@ -604,6 +606,7 @@ def main():
     ap.add_argument("--quality", default="1440p", choices=list(QUALITIES), help="output resolution (default 1440p, sharpest)")
     ap.add_argument("--preview", type=float, metavar="SECONDS", help="render only the first SECONDS (to try settings)")
     ap.add_argument("--scenes", type=int, help="only render the first N scenes")
+    ap.add_argument("--hold", type=float, default=0.0, metavar="SECONDS", help="extra seconds each finished slide stays up before the next one (default 0; a slide's own 'Hold:' wins)")
     ap.add_argument("--workers", type=int, help="parallel render processes (default: half the CPU cores)")
     a = ap.parse_args()
 
@@ -614,7 +617,7 @@ def main():
             print(f"[html2mp4] {pct:3d}%  {label}", flush=True); shown.update(label=label, pct=pct)
     try:
         convert(a.html, a.out, a.voice, a.speed, a.music, a.music_volume, a.scenes, a.workers, progress,
-                quality=a.quality, preview_seconds=a.preview)
+                quality=a.quality, preview_seconds=a.preview, hold=a.hold)
     except ConversionError as e:
         sys.exit(f"[html2mp4] error: {e}")
 

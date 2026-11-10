@@ -63,6 +63,11 @@ Say: Done well, it builds trust, speeds up growth, and prevents surprises at rev
 - `Note:` is the visual idea for the designer, in plain words: for example "a flow of three steps", "this versus that", "one big
   number counting up: 70%", "a timeline across the slide", "a cycle", "a hub with four spokes", "a checklist that ticks off",
   "a large quote". Use a Note on most slides and vary them, so the video does not look like a deck of boxes.
+- `Hold:` (optional; a number of seconds, 0 to 30) is how long the finished slide stays on screen after its last sentence, before
+  the next slide appears. Without it the Studio's Pacing setting applies. If the person says a slide changes too quickly, or that
+  its last graphic isn't on screen long enough, add `Hold: 3` (2 to 4 seconds; more for a dense slide) to that slide and change
+  nothing else about it. `Hold:` is timing only: it never needs a redesign, so never put it in `visual_requests`. `Hold: 0` means
+  no extra time. If they'd rather the graphic simply appear earlier in the sentence, that is a visual request instead.
 
 # Writing narration
 - Write for the ear: short sentences (under 25 words), plain words, second person ("you"), one idea per sentence.
@@ -204,7 +209,11 @@ def diff(old_text, new_text):
     key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note)
     olds, news = [] if old is None else [key(s) for s in old.slides], [key(s) for s in new.slides]
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, olds, news, autojunk=False).get_opcodes():
-        if op == "equal": continue
+        if op == "equal":
+            for k in range(j2 - j1):                                   # same words and look, different time on screen
+                if old.slides[i1 + k].hold != new.slides[j1 + k].hold:
+                    rows.append({"slide": f"s{j1 + k + 1}", "title": new.slides[j1 + k].title, "kind": "timing"})
+            continue
         pair = min(i2 - i1, j2 - j1) if op == "replace" else 0
         for k in range(j2 - j1):
             rows.append({"slide": f"s{j1 + k + 1}", "title": new.slides[j1 + k].title, "kind": "changed" if k < pair else "added"})
