@@ -8,10 +8,13 @@ const post = (url, body, method = "POST") => api(url, {method, headers: {"Conten
 // What you type is kept with the module as you go (a moment after you stop), so a closed tab or a crash loses nothing.
 const draft = {
   timer: null, pending: null,
-  set(text){ if(!W.project) return; this.pending = {pid: W.project, text}; $("#wSaved").textContent = "Saving…"; clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 700); },
+  set(text){ if(!W.project || W.viewing) return; this.pending = {pid: W.project, text}; $("#wSaved").textContent = "Saving…"; clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 700); },
   async flush(){
     clearTimeout(this.timer); const p = this.pending; this.pending = null; if(!p) return;
-    try{ await post(`/api/projects/${p.pid}`, {script: p.text}, "PATCH"); if(!this.pending) $("#wSaved").textContent = "Saved"; }
+    try{
+      await post(`/api/projects/${p.pid}`, {script: p.text}, "PATCH"); if(!this.pending) $("#wSaved").textContent = "Saved";
+      if(W.current && W.current.id === p.pid && W.designed && !W.viewing){ W.current.has_draft = p.text !== W.current.designed_script; renderVersionMenu(W.current); }   // the history lists the draft
+    }
     catch{ $("#wSaved").textContent = "Couldn't save. Is the Studio still running?"; }
   },
 };
@@ -38,7 +41,7 @@ async function parseNow(){
   updateButtons();
 }
 function updateButtons(){
-  const ok = !!W.outline, busy = W.busy;
+  const ok = !!W.outline && !W.viewing, busy = W.busy;
   $("#wDesign").disabled = !ok || busy || !W.project || (W.designed && W.mode !== "basic" && box.value === W.saved) || (W.designed && W.mode === "basic" && !W.keySet);
   $("#wReview").disabled = !ok || busy || !W.keySet;
   $("#wBasic").hidden = !!W.designed;
@@ -163,20 +166,18 @@ function slideStarts(o){
   return rows;
 }
 async function openProject(pid, version){
-  if(W.project && W.project !== pid) await draft.flush();                       // what was being typed in the module we're leaving
-  const p = await api(`/api/projects/${pid}`);
-  W.project = pid; W.current = p; W.designed = p.versions.length > 0; W.saved = p.designed_script; W.version = version || p.current;
+  await draft.flush();                                                          // what was being typed, before the module (or the version) changes
+  const p = await api(`/api/projects/${pid}` + (version ? `?v=${version}` : ""));
+  W.project = pid; W.current = p; W.designed = p.versions.length > 0; W.saved = p.designed_script; W.version = p.version; W.viewing = p.viewing ? p.version : null;
   W.mode = (p.versions.find(v => v.n === p.current) || {}).mode || "design";
   if(box.value !== p.script) box.value = p.script;
-  $("#wSaved").textContent = "";
+  box.readOnly = !!W.viewing; $("#wSaved").textContent = "";
   showModule(p);
   await parseNow();
   if(!p.versions.length){ $("#cardReview").hidden = true; updateButtons(); return; }
   $("#cardReview").hidden = false;
   const o = W.outline || p.outline; W.rows = o ? slideStarts(o) : [];
   $("#rvMeta").textContent = p.title;
-  $("#rvVersion").innerHTML = [...p.versions].reverse().map(v => `<option value="${v.n}" ${v.n === W.version ? "selected" : ""}>Version ${v.n}${v.n === p.current ? " (current)" : ""} · ${esc(v.note || "")} · ${ago(v.at)}</option>`).join("");
-  $("#rvRestore").hidden = W.version === p.current;
   showFrame();
   const bySlide = {};
   for(const i of p.issues) (bySlide[i.slide] ||= []).push(i);
@@ -203,7 +204,10 @@ function showFrame(){
   $("#rvShare").open = false;
 }
 $("#rvShare").addEventListener("click", e => { if(e.target.closest(".share-menu a, .share-menu button")) setTimeout(() => { $("#rvShare").open = false; }, 0); });
-addEventListener("click", e => { const d = $("#rvShare"); if(d.open && !d.contains(e.target)) d.open = false; });
+addEventListener("click", e => document.querySelectorAll("details.share[open]").forEach(d => { if(!d.contains(e.target)) d.open = false; }));
+addEventListener("keydown", e => { if(e.key === "Escape") document.querySelectorAll("details.share[open]").forEach(d => { d.open = false; d.querySelector("summary").focus(); }); });
+$("#verSel").addEventListener("toggle", () => { if($("#verSel").open) $("#rvShare").open = false; });             // one menu at a time
+$("#rvShare").addEventListener("toggle", () => { if($("#rvShare").open) $("#verSel").open = false; });
 $("#rvYaml").addEventListener("click", async () => {
   const url = `/api/projects/${W.project}/export?v=${W.version}&format=yaml`, dlg = $("#yamlView");
   $("#yvText").textContent = "Loading…"; $("#yvMeta").textContent = ""; $("#yvSave").href = url;
@@ -231,17 +235,13 @@ addEventListener("message", e => {
   const i = W.rows.findIndex(r => e.data.pos >= r.first && e.data.pos <= r.last);
   document.querySelectorAll("#rvSlides button").forEach((b, k) => b.classList.toggle("on", k === i));
 });
-$("#rvVersion").addEventListener("change", e => { W.version = +e.target.value; $("#rvRestore").hidden = W.version === W.current.current; showFrame(); });
-$("#rvRestore").addEventListener("click", async () => {
-  try{ await post(`/api/projects/${W.project}/restore`, {version: W.version}); toast(`Restored version ${W.version}`); await openProject(W.project); loadModules(); }
-  catch(err){ toast(err.message); }
-});
 $("#fbGo").addEventListener("click", () => {
   const text = $("#fbText").value.trim(); if(!text){ toast("Write what you'd like changed"); return; }
   const scope = $("#fbScope").value;
   startJob(post(`/api/projects/${W.project}/revise`, {feedback: text, scope: scope ? [scope] : []}).then(r => { $("#fbText").value = ""; return {...r, project: W.project}; }));
 });
 $("#rvUse").addEventListener("click", async () => {
+  if(W.viewing){ toast("Restore this version, or go back to the current one, to make a video."); return; }
   try{ const u = await post(`/api/projects/${W.project}/to-video`, {}); showUpload(u); location.hash = "#create"; toast("Slides ready. Choose a voice and music."); }
   catch(err){ toast(err.message); }
 });
@@ -255,13 +255,52 @@ function showModule(p){
   if(document.body.dataset.page === "write" && location.hash !== `#write/${encodeURIComponent(p.id)}`) history.replaceState(null, "", `#write/${encodeURIComponent(p.id)}`);
   document.querySelector('.tabs a[data-page="write"]').setAttribute("href", `#write/${encodeURIComponent(p.id)}`);   // the Write tab goes back to this module
 }
+const when = t => new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
 function setHead(p){
   $("#wNameText").textContent = p.name; document.title = `${p.name} · ${SITE}`;
-  const st = $("#wState"), n = p.versions.length;
-  st.textContent = n ? `Designed · version ${p.current}` : "Not designed yet"; st.classList.toggle("on", n > 0);
+  const n = p.versions.length;
+  $("#wState").hidden = n > 0; $("#wState").textContent = "Not designed yet";
+  $("#verSel").hidden = !n; $("#verSel").open = false;
+  if(n){
+    $("#verLabel").textContent = p.viewing ? `Viewing version ${p.version}` : `Version ${p.current} · current`;
+    $("#verLabel").classList.toggle("on", !p.viewing);
+    renderVersionMenu(p);
+  }
+  $("#shareFor").textContent = n ? `Sharing version ${p.version}${p.viewing ? "" : " (current)"}` : "";
+  $("#rvFile small").textContent = `.h2m.json · version ${p.version}`;
+  $("#verBar").hidden = !p.viewing;
+  if(p.viewing){
+    const v = p.versions.find(x => x.n === p.version) || {};
+    $("#verBarText").innerHTML = `Viewing <b>version ${p.version}</b> · ${esc(when(v.at))}${v.note ? ` · ${esc(v.note)}` : ""}. The script and slides are exactly as they were. Go back to the current version to make changes.`;
+  }
+  document.body.toggleAttribute("data-viewing", !!p.viewing);
+  updateButtons();
+  if(typeof render === "function"){ if(p.viewing && C.open) setOpen(false); render(); }       // the assistant can't edit an old version, so it gets out of the way
 }
+function renderVersionMenu(p){
+  const rows = [...p.versions].reverse().map(v => `<button type="button" class="vrow" role="menuitem" data-n="${v.n}" ${v.n === p.version ? 'aria-current="true"' : ""}>
+    <span class="vt"><b>v${v.n}</b><span class="vn">${esc(v.note || "Version " + v.n)}</span>${v.n === p.current ? `<span class="vtag">current</span>` : ""}</span>
+    <small>${esc(when(v.at))}${v.cost ? ` · about $${v.cost.toFixed(2)}` : ""}</small></button>`).join("");
+  const draftRow = p.has_draft ? `<div class="vrow draft"><span class="vt"><b>Draft</b><span class="vn">Script changes not designed yet</span></span><small>${p.viewing ? "Waiting for you in the current version" : "Update slides to save them as a version"}</small></div>` : "";
+  $("#verMenu").innerHTML = `<div class="menu-h">Version history</div>${draftRow}${rows}`;
+}
+$("#verMenu").addEventListener("click", e => {
+  const b = e.target.closest(".vrow[data-n]"); if(!b) return;
+  $("#verSel").open = false;
+  if(W.busy){ toast("Claude is still designing. Try again when it finishes."); return; }
+  const n = +b.dataset.n; if(n === W.version) return;
+  openProject(W.project, n === W.current.current ? undefined : n).catch(err => toast(err.message));
+});
+$("#verBack").addEventListener("click", () => openProject(W.project));
+$("#verRestore").addEventListener("click", async () => {
+  try{
+    const n = W.version; await post(`/api/projects/${W.project}/restore`, {version: n}); await openProject(W.project); loadModules();
+    toast(`Version ${n} is current again, saved as version ${W.current.current}.`);
+  }catch(err){ toast(err.message); }
+});
 function showHome(){
   clearTimeout(W.parseTimer); W.project = null; W.current = null; W.designed = false; W.outline = null; box.value = ""; W.saved = "";
+  W.viewing = null; box.readOnly = false; document.body.removeAttribute("data-viewing"); $("#verBar").hidden = true;
   delete document.body.dataset.module; document.title = SITE; if(typeof switchChat === "function") switchChat();
   document.querySelector('.tabs a[data-page="write"]').setAttribute("href", "#write");
   $("#wHero").hidden = false; $("#wHead").hidden = true; $("#cardScript").hidden = true; $("#cardReview").hidden = true;

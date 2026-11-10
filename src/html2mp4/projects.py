@@ -162,6 +162,12 @@ def slides(pid, n=None):
     except (FileNotFoundError, ValueError): return {}
 
 
+def version_script(pid, n):
+    """The script a version was made from (None if it isn't there)."""
+    try: return json.loads((folder(pid) / "versions" / f"v{int(n)}.json").read_text()).get("script")
+    except (FileNotFoundError, ValueError): return None
+
+
 def version_html(pid, n):
     try: return (folder(pid) / "versions" / f"v{int(n)}.html").read_text(encoding="utf-8")
     except FileNotFoundError: return None

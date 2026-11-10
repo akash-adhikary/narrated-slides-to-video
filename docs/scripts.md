@@ -185,8 +185,19 @@ slide to see it fully revealed.
 - "Replace the checklist with four numbered cards."
 - "At 2:51 the boxes overlap." Times refer to the finished video; the Studio matches them to a slide.
 
-Only the slides you name are redesigned. Each change is checked the same way and saved as a new **version**. Pick an
-earlier version from the list to look at it, and **Restore this version** to go back to it.
+Only the slides you name are redesigned. Each change is checked the same way and saved as a new **version**.
+
+### Versions
+
+A version is the whole module at one moment: its script, its slides and the checker's results together. The version chip in the
+module header (for example **Version 4 · current**) opens the history. Pick an earlier version and the page shows it whole: that
+version's script in the script box, its slides in the preview, and a banner saying which version you are looking at. It is
+read-only: the script box, Design, the assistant and "make the video" are switched off until you go back.
+
+- **Back to current** returns you to where you were. Nothing is lost, and a script draft you hadn't designed yet is waiting
+  (history lists it as **Draft**).
+- **Restore this version** makes that version current again by saving it as a new version, so the history only ever grows.
+- **Share** (also in the header) exports the version you are viewing; "with history" always includes all of them.
 
 **Editing the script** and clicking **Update slides** redesigns only the slides whose text changed. The others stay
 exactly as they were.

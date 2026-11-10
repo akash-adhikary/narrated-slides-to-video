@@ -98,3 +98,16 @@ def test_the_assistant_is_told_which_module_it_is_working_on():
     assert "own label for this piece of work" in seen["system"]
     chat.turn([{"role": "user", "content": "x"}], "", False, {}, call=call)
     assert "named" not in seen["msg"]
+
+
+def test_an_earlier_version_is_seen_whole_script_slides_and_all(client):
+    pid = _designed_project(client)
+    old = projects.get(pid)["script"]
+    projects.save_version(pid, "<html>two</html>", None, "Second", script_text=old.replace("Welcome", "Hello", 1))
+    now = client.get(f"/api/projects/{pid}").json()
+    assert now["viewing"] is False and now["version"] == 2 and "Hello" in now["script"]
+    then = client.get(f"/api/projects/{pid}", params={"v": 1}).json()
+    assert then["viewing"] is True and then["version"] == 1 and then["script"] == old and then["current"] == 2     # its own script, though 2 is current
+    assert [v["n"] for v in then["versions"]] == [1, 2] and then["designed_script"].count("Hello") == 1
+    assert client.get(f"/api/projects/{pid}", params={"v": 2}).json()["viewing"] is False                        # asking for the current one is just the current one
+    assert client.get(f"/api/projects/{pid}", params={"v": 9}).status_code == 404

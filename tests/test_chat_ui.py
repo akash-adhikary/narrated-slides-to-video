@@ -257,3 +257,52 @@ def test_each_module_has_its_own_conversation(page):
     page.goto(page.url.split("#")[0] + "#write/" + first); page.wait_for_function("W.project === '%s'" % first)
     if page.is_hidden("#aiPanel"): page.click("#aiOrb")
     page.wait_for_function("document.querySelector('#aiLog').textContent.includes('hello there')")
+
+
+def two_versions(app):
+    """A designed module whose second version has a different script."""
+    pid = quick_project(app)
+    cur = projects.get(pid)["script"]
+    projects.save_version(pid, projects.version_html(pid, 1).replace("Meet your buddy", "Meet your guide"), None, "Second try", script_text=cur.replace("Welcome aboard.", "Welcome, everyone."))
+    return pid, cur
+
+
+def test_version_control_lives_in_the_header_and_moves_script_and_slides_together(page, app):
+    pid, v1_script = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#aiOrb")                                                                                    # open while we go looking at an old version
+    assert page.inner_text("#verLabel").startswith("Version 2 · current") and page.is_visible("#rvShare") and page.locator(".rv-bar #rvShare").count() == 0   # export is up here too
+    assert "Welcome, everyone." in page.input_value("#wScript") and page.is_hidden("#verBar")
+    page.click("#verLabel")
+    rows = page.locator("#verMenu .vrow[data-n]"); assert rows.count() == 2 and "current" in rows.nth(0).inner_text()
+    rows.nth(1).click()                                                                                     # version 1
+    page.wait_for_selector("#verBar", state="visible"); assert page.is_hidden("#aiPanel")                      # the assistant steps aside
+    assert page.input_value("#wScript") == v1_script and page.eval_on_selector("#wScript", "e => e.readOnly")       # its script, not the latest
+    assert page.inner_text("#verLabel") == "Viewing version 1" and "version 1" in page.inner_text("#verBarText")
+    assert page.get_attribute("#rvFrame", "src").split("v=")[1].startswith("1&") and page.get_attribute("#rvDownload", "href").endswith("v=1")   # the slides and the exports follow
+    page.click("#rvShare summary"); assert "version 1" in page.inner_text("#shareFor").lower(); page.click("#rvShare summary")
+    assert page.is_disabled("#wDesign")
+    page.click("#aiOrb"); assert page.is_disabled("#aiInput") and "current version" in page.get_attribute("#aiInput", "placeholder"); page.click("#aiClose")
+    page.click("#verBack"); page.wait_for_selector("#verBar", state="hidden")
+    assert "Welcome, everyone." in page.input_value("#wScript") and not page.eval_on_selector("#wScript", "e => e.readOnly") and page.is_enabled("#aiInput")
+
+
+def test_restoring_an_older_version_makes_a_new_one_and_keeps_the_history(page, app):
+    pid, v1_script = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#verLabel"); page.locator("#verMenu .vrow[data-n]").nth(1).click(); page.wait_for_selector("#verBar", state="visible")
+    page.click("#verRestore"); page.wait_for_selector("#verBar", state="hidden")
+    assert page.inner_text("#verLabel").startswith("Version 3 · current") and page.input_value("#wScript") == v1_script
+    page.click("#verLabel"); assert page.locator("#verMenu .vrow[data-n]").count() == 3 and "Restored version 1" in page.inner_text("#verMenu")
+
+
+def test_a_draft_survives_a_look_at_an_older_version(page, app):
+    pid, _ = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    mine = page.input_value("#wScript") + "\n## A new idea\nSay: Something new.\n"
+    page.fill("#wScript", mine); page.wait_for_function("document.querySelector('#wSaved').textContent === 'Saved'")
+    page.click("#verLabel"); assert "Script changes not designed yet" in page.inner_text("#verMenu")
+    page.locator("#verMenu .vrow[data-n]").nth(1).click(); page.wait_for_selector("#verBar", state="visible")
+    assert "A new idea" not in page.input_value("#wScript") and "Waiting for you" in page.evaluate("document.querySelector('#verMenu').textContent")
+    page.click("#verBack"); page.wait_for_selector("#verBar", state="hidden")
+    assert page.input_value("#wScript") == mine                                                           # still there, untouched

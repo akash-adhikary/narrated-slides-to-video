@@ -644,18 +644,23 @@ def write_active():
     return [dict(j) for j in design_jobs.values() if j["status"] in ("queued", "running")]
 
 
-def project_view(pid):
+def project_view(pid, version=None):
+    """A module as the Write page shows it: the current version, or (`version`) an earlier one, whole: its script, slides and checks."""
     p = projects.get(pid)
     if not p: raise HTTPException(404, "That module wasn't found.")
-    shown = projects.working_script(p)
+    if version is not None and version not in [v["n"] for v in p["versions"]]: raise HTTPException(404, "That version doesn't exist.")
+    viewing = version is not None and version != p["current"]
+    n = version if viewing else p["current"]
+    shown = (projects.version_script(pid, n) or p["script"]) if viewing else projects.working_script(p)
     try: m = script.parse(shown); outl, title = outline(m), m.title
     except script.ScriptError: outl, title = None, p["title"]
-    cur = next((v for v in p["versions"] if v["n"] == p["current"]), None)
+    cur = next((v for v in p["versions"] if v["n"] == n), None)
     return {**{k: p[k] for k in ("id", "name", "created", "updated", "current", "feedback")}, "title": title, "script": shown,
+            "version": n, "viewing": viewing, "has_draft": p.get("draft") is not None,
             "designed_script": p["script"] if p["versions"] else "",
             "versions": [{k: v[k] for k in ("n", "at", "note", "cost", "mode")} for v in p["versions"]],
             "issues": (cur or {}).get("issues", []), "outline": outl,
-            "slides": {k: {"layout": v["layout"], "summary": v["summary"]} for k, v in projects.slides(pid).items()}}
+            "slides": {k: {"layout": v["layout"], "summary": v["summary"]} for k, v in projects.slides(pid, n).items()}}
 
 
 @app.get("/api/projects")
@@ -713,7 +718,7 @@ def put_chat(pid: str, body: ChatSaveIn):
 
 
 @app.get("/api/projects/{pid}")
-def get_project(pid: str): return project_view(pid)
+def get_project(pid: str, v: int | None = None): return project_view(pid, v)
 
 
 @app.delete("/api/projects/{pid}")

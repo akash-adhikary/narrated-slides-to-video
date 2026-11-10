@@ -102,9 +102,10 @@ function render(){
     const lastBot = [...C.items].reverse().find(i => i.role === "assistant" && !i.kind && !i.error);
     renderChips(!C.busy && lastBot && lastBot === C.items.filter(i => !i.kind).at(-1) && lastBot.suggestions ? lastBot.suggestions : []);
   }
-  $("#aiAutoRow").hidden = !designed();
+  $("#aiAutoRow").hidden = !designed() || !!W.viewing;
+  aiEl.input.disabled = !!W.viewing; aiEl.input.placeholder = W.viewing ? "Go back to the current version to talk to me" : "Tell me what to write or change…";
   aiEl.panel.classList.toggle("busy", C.busy);
-  aiEl.send.disabled = C.busy;
+  aiEl.send.disabled = C.busy || !!W.viewing;
   $("#aiModule").textContent = W.current ? W.current.name : "";
   aiEl.state.textContent = C.busy ? (C.stage || "Thinking…") : C.cost ? `Ready · about $${C.cost.toFixed(2)} this chat` : "Ready when you are";
   if(atEnd) log.scrollTop = log.scrollHeight;
@@ -130,7 +131,9 @@ aiEl.input.addEventListener("input", autosize);
 aiEl.input.addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); $("#aiForm").requestSubmit(); } });
 $("#aiForm").addEventListener("submit", e => { e.preventDefault(); const t = aiEl.input.value.trim(); if(t && !C.busy) sendMessage(t); });
 
+const VIEWING = "You're viewing an earlier version. Go back to the current one to make changes.";
 async function sendMessage(text){
+  if(W.viewing){ toast(VIEWING); return; }
   if(C.listening) stopListening();
   const pid = W.project;                                       // this reply belongs to the module it was asked in, even if you move on
   aiEl.input.value = ""; autosize();
@@ -170,6 +173,7 @@ async function sendMessage(text){
 /* ---------- the buttons on a card ---------- */
 async function applyCard(i){
   if(i.running) return;
+  if(W.viewing){ toast(VIEWING); return; }
   if(!designed()){                                            // nothing designed yet: the page's own Design button does it
     if($("#wDesign").disabled){ toast(W.busy ? "Claude is still designing. Try again when it finishes." : !W.keySet ? "Add your Anthropic API key in Settings first." : "The slides already match your script."); return; }
     $("#wDesign").click(); setOpen(false); return;
@@ -194,6 +198,7 @@ async function applyCard(i){
 aiEl.log.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if(!b) return;
   const i = C.items[+b.closest(".ai-card").dataset.i];
+  if(W.viewing){ toast(VIEWING); return; }
   if(b.dataset.act === "undo"){ box.value = i.before; draft.set(i.before); parseNow(); i.undone = true; delete i.before; store.save(); render(); toast("Script restored"); }
   if(b.dataset.act === "apply") applyCard(i);
 });

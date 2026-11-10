@@ -37,8 +37,20 @@
     <button type="button" class="mname" id="wName" title="Rename this module"><span id="wNameText"></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11 2.5l2.5 2.5L5.5 13 2 14l1-3.5z"/></svg></button>
     <form id="wNameForm" hidden><input id="wNameInput" maxlength="80" aria-label="Module name" autocomplete="off"></form>
     <span class="mstate" id="wState"></span>
-    <button class="link" type="button" id="wNew">New module</button>
+    <details class="share ver" id="verSel" hidden><summary class="mstate on" id="verLabel" title="Version history: the script and the slides move together"></summary>
+      <div class="share-menu ver-menu" id="verMenu" role="menu" aria-label="Version history"></div></details>
+    <div class="mhead-r">
+<details class="share" id="rvShare"><summary class="link" title="Download this module to share it">Share</summary>
+            <div class="share-menu"><div class="menu-h" id="shareFor"></div>
+              <a id="rvDownload" title="One HTML file to review or share. It plays with your browser's voice and can be opened again here.">Playable HTML<small>Plays anywhere; opens here for editing</small></a>
+              <a id="rvFile" title="The script, slide designs and finished page in one file you can send and open again">Module file<small>.h2m.json · this version</small></a>
+              <a id="rvFileAll" title="The same, with every version">Module file with history<small>.h2m.json · all versions</small></a>
+              <button type="button" id="rvYaml">View as YAML<small>Read or copy the module as text</small></button>
+            </div></details>
+      <button class="link" type="button" id="wNew">New module</button></div>
   </nav>
+  <div class="verbar" id="verBar" role="status" hidden><span id="verBarText"></span>
+    <button class="btn-2" type="button" id="verRestore">Restore this version</button><button class="link" type="button" id="verBack">Back to current</button></div>
 
   <section class="card" id="cardScript" aria-labelledby="hScript" hidden>
     <div class="card-h"><span class="num">1</span><h2 id="hScript">Your script</h2><p id="wStats"></p></div>
@@ -101,15 +113,7 @@ Note: three cards, left to right</pre>
     <div class="rv-grid">
       <div class="rv-stage">
         <iframe id="rvFrame" title="Slide preview" src="about:blank" allow="fullscreen; autoplay" allowfullscreen></iframe>
-        <div class="rv-bar"><select id="rvVersion" aria-label="Version"></select><button class="link" type="button" id="rvRestore" hidden>Restore this version</button>
-          <a class="link" id="rvOpen" target="_blank" rel="noopener" title="Open the player in its own tab">Open large</a>
-          <details class="share" id="rvShare"><summary class="link" title="Download this module to share it">Share</summary>
-            <div class="share-menu">
-              <a id="rvDownload" title="One HTML file to review or share. It plays with your browser's voice and can be opened again here.">Playable HTML<small>Plays anywhere; opens here for editing</small></a>
-              <a id="rvFile" title="The script, slide designs and finished page in one file you can send and open again">Module file<small>.h2m.json · this version</small></a>
-              <a id="rvFileAll" title="The same, with every version">Module file with history<small>.h2m.json · all versions</small></a>
-              <button type="button" id="rvYaml">View as YAML<small>Read or copy the module as text</small></button>
-            </div></details></div>
+        <div class="rv-bar"><a class="link" id="rvOpen" target="_blank" rel="noopener" title="Open the player in its own tab">Open large</a></div>
         <dialog id="yamlView" aria-label="Module as YAML"><div class="yv-bar"><b>Module as YAML</b><span id="yvMeta"></span>
           <button class="link" type="button" id="yvCopy">Copy</button><a class="link" id="yvSave">Download</a><button class="link" type="button" id="yvClose">Close</button></div>
           <pre id="yvText" tabindex="0"></pre></dialog>
