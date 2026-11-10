@@ -180,7 +180,8 @@ Two ways to use a file that comes back:
 
 ## Your brand
 
-Open **Settings** to set the look of every module.
+Open **Settings** to set the look of every module. A fresh install starts with the bundled ThoughtSpot brand (colours, logos,
+rules and the Geist fonts), so slides are on-brand straight away; importing your own kit replaces it, and Reset brings it back.
 
 - **Brand kit.** Drop in a brand folder or `.zip`, a guidelines PDF, logos, font files, or a module you've made before.
   Claude reads the guidelines and proposes the colours, dark and light slide styles, typefaces, logos and design rules,

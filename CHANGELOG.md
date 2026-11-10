@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- ThoughtSpot is now the built-in brand: a fresh install starts with the ThoughtSpot colours, dark and light logos, design rules, pronunciations and the Geist / Geist Mono fonts (SIL OFL), so slides come out on-brand with no setup. Settings > Brand kit still replaces it and Reset returns to it; `HTML2MP4_BRAND=neutral` starts from the plain brand. Anyone with a saved brand is unchanged.
 - **Motion and graphics.** Slides are no longer just cards. Claude now has a tested motion kit (entrances such as pop, slide, blur and
   wipe; icons, arrows and diagram lines that draw themselves in; count-up numbers; highlight sweeps and glows; arrows that appear
   between steps; gently floating illustrations and drifting light) and a catalogue of layouts to choose from (big statement with an

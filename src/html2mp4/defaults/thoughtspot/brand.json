@@ -1,0 +1,172 @@
+{
+ "brand": {
+  "style": "dark",
+  "background": "#08062B",
+  "text": "#FFFFFF",
+  "accent": "#04D1FF",
+  "accent2": "#714BFB",
+  "heading_font": "Geist Mono",
+  "body_font": "Geist",
+  "footer_text": "",
+  "logo_on_dark": "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgNTciPgogIDxkZWZzPgogICAgPHN0eWxlPgogICAgICAuY2xzLTEgewogICAgICAgIGZpbGw6ICNmZmY7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTE0Ni44OCwyNy44OWMtLjc0LS40My0xLjc0LS44LTIuOTctMS4xLTEuMDItLjI2LTEuOC0uNS0yLjM0LS43Mi0uNTEtLjIxLS44Ni0uNDUtMS4wNC0uNy0uMTgtLjI1LS4yNy0uNTgtLjI3LS45OCwwLS42My4yMy0xLjEzLjcxLTEuNTEuNDktLjQsMS4xNy0uNiwyLjAxLS42LjY5LDAsMS4yNy4xMiwxLjc1LjM2LjQ3LjI0Ljg0LjU4LDEuMTEsMSwuMjguNDMuNDUuOTMuNTMsMS40OGwuMDMuMjJoMi4zNHMtLjA1LS40LS4wNS0uNGMtLjExLS45Mi0uNDEtMS43Ni0uODgtMi40OS0uNDctLjczLTEuMTItMS4zMS0xLjkyLTEuNzQtLjgtLjQyLTEuNzctLjYzLTIuODctLjYzLTEuMDMsMC0xLjk0LjE4LTIuNy41NS0uNzYuMzctMS4zNi44OS0xLjc4LDEuNTUtLjQxLjY2LS42MiwxLjQzLS42MiwyLjMsMCwuNzcuMTYsMS40Mi40OCwxLjk1LjMyLjUzLjgzLjk4LDEuNTMsMS4zNS42OC4zNSwxLjYuNjcsMi43NC45NywxLjE1LjI5LDIuMDIuNTcsMi42Ljg2LjU1LjI3LjkzLjU3LDEuMTIuODguMTkuMzEuMjguNjcuMjgsMS4wOCwwLC40NC0uMTEuODItLjM0LDEuMTItLjIyLjMtLjU2LjU0LS45OS43LS40NS4xNy0xLjAxLjIzLTEuNjcuMjMtLjc0LDAtMS4zOS0uMS0xLjkxLS4zNS0uNTEtLjI0LS45My0uNi0xLjIzLTEuMDctLjMxLS40OC0uNTEtMS4wNy0uNi0xLjc1bC0uMDMtLjIyaC0yLjMybC4wMi4zOWMuMDksMS4wMi4zOSwxLjk0Ljg5LDIuNzEuNTEuNzgsMS4yMSwxLjQsMi4wOCwxLjg0Ljg3LjQ0LDEuODkuNjYsMy4wNS42NiwxLjAzLDAsMS45NS0uMTgsMi43NS0uNTIuODEtLjM1LDEuNDUtLjg2LDEuOTEtMS41Mi40Ny0uNjYuNy0xLjQ1LjctMi4zNSwwLS43NC0uMTctMS40MS0uNDktMS45OS0uMzMtLjU4LS44Ny0xLjEtMS42My0xLjU0WiIvPgogIDxwb2x5Z29uIGNsYXNzPSJjbHMtMSIgcG9pbnRzPSI1My41NCAyMi40OCA1Ny44MiAyMi40OCA1Ny44MiAzNS42MSA2MC4wNSAzNS42MSA2MC4wNSAyMi40OCA2NC40NSAyMi40OCA2NC40NSAyMC4yNSA1My41NCAyMC4yNSA1My41NCAyMi40OCIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTk5LjU5LDMwLjc2YzAsMS41Ni0xLjI3LDIuODMtMi44MywyLjgzcy0yLjgzLTEuMjctMi44My0yLjgzdi02LjY2aC0yLjIydjYuNjZjMCwyLjc4LDIuMjcsNS4wNSw1LjA1LDUuMDVzNS4wNS0yLjI3LDUuMDUtNS4wNXYtNi42NmgtMi4yMnY2LjY2WiIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTgzLjk0LDIzLjkyYy0zLjI4LDAtNS45NSwyLjY3LTUuOTUsNS45NXMyLjY3LDUuOTUsNS45NSw1Ljk1LDUuOTUtMi42Nyw1Ljk1LTUuOTUtMi42Ny01Ljk1LTUuOTUtNS45NVpNODMuOTQsMzMuNTljLTIuMDYsMC0zLjczLTEuNjctMy43My0zLjczczEuNjctMy43MywzLjczLTMuNzMsMy43MywxLjY3LDMuNzMsMy43My0xLjY3LDMuNzMtMy43MywzLjczWiIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTE3MC4xNSwyMy45MmMtMy4yOCwwLTUuOTUsMi42Ny01Ljk1LDUuOTVzMi42Nyw1Ljk1LDUuOTUsNS45NSw1Ljk1LTIuNjcsNS45NS01Ljk1LTIuNjctNS45NS01Ljk1LTUuOTVaTTE3MC4xNSwzMy41OWMtMi4wNiwwLTMuNzMtMS42Ny0zLjczLTMuNzNzMS42Ny0zLjczLDMuNzMtMy43MywzLjczLDEuNjcsMy43MywzLjczLTEuNjcsMy43My0zLjczLDMuNzNaIi8+CiAgPHBhdGggY2xhc3M9ImNscy0xIiBkPSJNMTgxLjY3LDIwLjI0aC0yLjIydjMuODZoLTIuODJ2Mi4yMmgyLjgydjYuMDJjMCwxLjgsMS40NywzLjI3LDMuMjcsMy4yN2gxLjg5di0yLjIyaC0xLjg5Yy0uNTgsMC0xLjA1LS40Ny0xLjA1LTEuMDV2LTYuMDJoMi45NHYtMi4yMmgtMi45NHYtMy44NloiLz4KICA8cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjEuODMsMjMuOTJjLTEuMjcsMC0yLjMyLjQ5LTMuMDksMS4yN2gtLjMzcy4zMy0xLjU1LjMzLTEuNTV2LTMuMzloLTIuMjN2MTUuMzdoMi4yM3YtNi42MmMwLTEuNTcsMS4yNy0yLjg0LDIuODQtMi44NHMyLjg0LDEuMjcsMi44NCwyLjg0djYuNjJoMi4yM3YtNi42MmMwLTIuOC0yLjAyLTUuMDctNC44Mi01LjA3WiIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTE1Ny4wOCwyMy45MmMtMS42MSwwLTMuMDMuNjQtNCwxLjY4aDBzLS4zMywwLS4zMywwbC4zMi0xLjQ5aC4wMXMwLDAsMCwwaC0yLjIzdjE3LjUyaDIuMjN2LTUuOTdsLS4zNC0xLjU2aC4zNGMuOTgsMS4wNywyLjM2LDEuNzMsNCwxLjczLDMuMDUsMCw1LjY4LTIuNjgsNS42OC01Ljk3cy0yLjY0LTUuOTItNS42Ny01LjkyWk0xNTYuODIsMzMuNTljLTIuMDUsMC0zLjcyLTEuNjctMy43Mi0zLjcyczEuNjctMy43MiwzLjcyLTMuNzIsMy43MiwxLjY3LDMuNzIsMy43Mi0xLjY3LDMuNzItMy43MiwzLjcyWiIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTcxLjQ0LDIzLjkyYy0xLjI3LDAtMi4zMi40OS0zLjA5LDEuMjdoLS4zM3MuMzMtMS41NS4zMy0xLjU1di0zLjM5aC0yLjIzdjE1LjM3aDIuMjN2LTYuNjJjMC0xLjU3LDEuMjctMi44NSwyLjg0LTIuODVzMi44NCwxLjI4LDIuODQsMi44NXY2LjYyaDIuMjN2LTYuNjJjMC0yLjgtMi4wMi01LjA3LTQuODItNS4wN1oiLz4KICA8cmVjdCBjbGFzcz0iY2xzLTEiIHg9IjE1LjM5IiB5PSIxNS4zOCIgd2lkdGg9IjI2LjI0IiBoZWlnaHQ9IjQuODYiLz4KICA8cmVjdCBjbGFzcz0iY2xzLTEiIHg9IjMxLjY2IiB5PSIyMS44NiIgd2lkdGg9IjkuOTciIGhlaWdodD0iNC44NiIvPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTIxLjc2LDIxLjg2aC02LjM3djQuODZoNi4zN2MyLjM4LDAsNC4zMiwxLjk0LDQuMzIsNC4zMnYxMC41OGg0Ljg2di0xMC41OGMwLTUuMDYtNC4xMi05LjE4LTkuMTgtOS4xOFoiLz4KICA8cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0zNi42NSwzMy43OGMtMi4yNSwwLTQuMDgsMS44My00LjA4LDQuMDhzMS44Myw0LjA4LDQuMDgsNC4wOCw0LjA4LTEuODMsNC4wOC00LjA4LTEuODMtNC4wOC00LjA4LTQuMDhaIi8+CiAgPHBhdGggY2xhc3M9ImNscy0xIiBkPSJNMTE0LjcxLDI1LjE2YzAtLjY5LS41Ni0xLjI0LTEuMjQtMS4yNHMtMS4yNC41Ni0xLjI0LDEuMjRjMCwuMDkuMDMuMTYuMDUuMjQtLjg5LS45MS0yLjEyLTEuNDgtMy41LTEuNDgtMi42OSwwLTQuODksMi4xOS00Ljg5LDQuODksMCwxLjM1LjU1LDIuNTEsMS40MywzLjMzbC0uNjcuNzFjLS43NS43Ni0uOTcsMS44OS0uNTYsMi44Ny40MS45OCwxLjM3LDEuNjIsMi40MywxLjYyaDQuODVjLjU3LDAsMS4wMy40NiwxLjAzLDEuMDNzLS40NiwxLjAzLTEuMDMsMS4wM2gtNy44MnYyLjIzaDcuODJjMS44LDAsMy4yNi0xLjQ2LDMuMjYtMy4yNnMtMS40Ni0zLjI2LTMuMjYtMy4yNmgtNS41MnYtLjM0bDEuNDktMS41NGMuNDUuMTIuOTIuMjEsMS40Mi4yMSwyLjY5LDAsNC44OS0xLjk0LDQuODktNC42MywwLS45Mi0uMjctMS43Ny0uNzItMi41MSwwLDAsMC0uMDEsMC0uMDIuMTYuMDguMzQuMTMuNTMuMTMuNjksMCwxLjI0LS41NiwxLjI0LTEuMjRaTTEwOC43OCwzMS40N2MtMS40NywwLTIuNjctMS4yLTIuNjctMi42N3MxLjItMi42NywyLjY3LTIuNjcsMi42NywxLjIsMi42NywyLjY3LTEuMiwyLjY3LTIuNjcsMi42N1oiLz4KICA8cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMzIuNjQsMjAuMjRoLTIuMjJ2My44NmgtMi44MnYyLjIyaDIuODJ2Ni4wMmMwLDEuOCwxLjQ3LDMuMjcsMy4yNywzLjI3aDEuODl2LTIuMjJoLTEuODljLS41OCwwLTEuMDUtLjQ3LTEuMDUtMS4wNXYtNi4wMmgyLjk0di0yLjIyaC0yLjk0di0zLjg2WiIvPgo8L3N2Zz4=",
+  "logo_on_light": "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgNTciPgogIDxwYXRoIGQ9Ik0xNDYuODgsMjcuODljLS43NC0uNDMtMS43NC0uOC0yLjk3LTEuMS0xLjAyLS4yNi0xLjgtLjUtMi4zNC0uNzItLjUxLS4yMS0uODYtLjQ1LTEuMDQtLjctLjE4LS4yNS0uMjctLjU4LS4yNy0uOTgsMC0uNjMuMjMtMS4xMy43MS0xLjUxLjQ5LS40LDEuMTctLjYsMi4wMS0uNi42OSwwLDEuMjcuMTIsMS43NS4zNi40Ny4yNC44NC41OCwxLjExLDEsLjI4LjQzLjQ1LjkzLjUzLDEuNDhsLjAzLjIyaDIuMzRzLS4wNS0uNC0uMDUtLjRjLS4xMS0uOTItLjQxLTEuNzYtLjg4LTIuNDktLjQ3LS43My0xLjEyLTEuMzEtMS45Mi0xLjc0LS44LS40Mi0xLjc3LS42My0yLjg3LS42My0xLjAzLDAtMS45NC4xOC0yLjcuNTUtLjc2LjM3LTEuMzYuODktMS43OCwxLjU1LS40MS42Ni0uNjIsMS40My0uNjIsMi4zLDAsLjc3LjE2LDEuNDIuNDgsMS45NS4zMi41My44My45OCwxLjUzLDEuMzUuNjguMzUsMS42LjY3LDIuNzQuOTcsMS4xNS4yOSwyLjAyLjU3LDIuNi44Ni41NS4yNy45My41NywxLjEyLjg4LjE5LjMxLjI4LjY3LjI4LDEuMDgsMCwuNDQtLjExLjgyLS4zNCwxLjEyLS4yMi4zLS41Ni41NC0uOTkuNy0uNDUuMTctMS4wMS4yMy0xLjY3LjIzLS43NCwwLTEuMzktLjEtMS45MS0uMzUtLjUxLS4yNC0uOTMtLjYtMS4yMy0xLjA3LS4zMS0uNDgtLjUxLTEuMDctLjYtMS43NWwtLjAzLS4yMmgtMi4zMmwuMDIuMzljLjA5LDEuMDIuMzksMS45NC44OSwyLjcxLjUxLjc4LDEuMjEsMS40LDIuMDgsMS44NC44Ny40NCwxLjg5LjY2LDMuMDUuNjYsMS4wMywwLDEuOTUtLjE4LDIuNzUtLjUyLjgxLS4zNSwxLjQ1LS44NiwxLjkxLTEuNTIuNDctLjY2LjctMS40NS43LTIuMzUsMC0uNzQtLjE3LTEuNDEtLjQ5LTEuOTktLjMzLS41OC0uODctMS4xLTEuNjMtMS41NFoiLz4KICA8cG9seWdvbiBwb2ludHM9IjUzLjU0IDIyLjQ4IDU3LjgyIDIyLjQ4IDU3LjgyIDM1LjYxIDYwLjA1IDM1LjYxIDYwLjA1IDIyLjQ4IDY0LjQ1IDIyLjQ4IDY0LjQ1IDIwLjI1IDUzLjU0IDIwLjI1IDUzLjU0IDIyLjQ4Ii8+CiAgPHBhdGggZD0iTTk5LjU5LDMwLjc2YzAsMS41Ni0xLjI3LDIuODMtMi44MywyLjgzcy0yLjgzLTEuMjctMi44My0yLjgzdi02LjY2aC0yLjIydjYuNjZjMCwyLjc4LDIuMjcsNS4wNSw1LjA1LDUuMDVzNS4wNS0yLjI3LDUuMDUtNS4wNXYtNi42NmgtMi4yMnY2LjY2WiIvPgogIDxwYXRoIGQ9Ik04My45NCwyMy45MmMtMy4yOCwwLTUuOTUsMi42Ny01Ljk1LDUuOTVzMi42Nyw1Ljk1LDUuOTUsNS45NSw1Ljk1LTIuNjcsNS45NS01Ljk1LTIuNjctNS45NS01Ljk1LTUuOTVaTTgzLjk0LDMzLjU5Yy0yLjA2LDAtMy43My0xLjY3LTMuNzMtMy43M3MxLjY3LTMuNzMsMy43My0zLjczLDMuNzMsMS42NywzLjczLDMuNzMtMS42NywzLjczLTMuNzMsMy43M1oiLz4KICA8cGF0aCBkPSJNMTcwLjE1LDIzLjkyYy0zLjI4LDAtNS45NSwyLjY3LTUuOTUsNS45NXMyLjY3LDUuOTUsNS45NSw1Ljk1LDUuOTUtMi42Nyw1Ljk1LTUuOTUtMi42Ny01Ljk1LTUuOTUtNS45NVpNMTcwLjE1LDMzLjU5Yy0yLjA2LDAtMy43My0xLjY3LTMuNzMtMy43M3MxLjY3LTMuNzMsMy43My0zLjczLDMuNzMsMS42NywzLjczLDMuNzMtMS42NywzLjczLTMuNzMsMy43M1oiLz4KICA8cGF0aCBkPSJNMTgxLjY3LDIwLjI0aC0yLjIydjMuODZoLTIuODJ2Mi4yMmgyLjgydjYuMDJjMCwxLjgsMS40NywzLjI3LDMuMjcsMy4yN2gxLjg5di0yLjIyaC0xLjg5Yy0uNTgsMC0xLjA1LS40Ny0xLjA1LTEuMDV2LTYuMDJoMi45NHYtMi4yMmgtMi45NHYtMy44NloiLz4KICA8cGF0aCBkPSJNMTIxLjgzLDIzLjkyYy0xLjI3LDAtMi4zMi40OS0zLjA5LDEuMjdoLS4zM3MuMzMtMS41NS4zMy0xLjU1di0zLjM5aC0yLjIzdjE1LjM3aDIuMjN2LTYuNjJjMC0xLjU3LDEuMjctMi44NCwyLjg0LTIuODRzMi44NCwxLjI3LDIuODQsMi44NHY2LjYyaDIuMjN2LTYuNjJjMC0yLjgtMi4wMi01LjA3LTQuODItNS4wN1oiLz4KICA8cGF0aCBkPSJNMTU3LjA4LDIzLjkyYy0xLjYxLDAtMy4wMy42NC00LDEuNjhoMHMtLjMzLDAtLjMzLDBsLjMyLTEuNDloLjAxczAsMCwwLDBoLTIuMjN2MTcuNTJoMi4yM3YtNS45N2wtLjM0LTEuNTZoLjM0Yy45OCwxLjA3LDIuMzYsMS43Myw0LDEuNzMsMy4wNSwwLDUuNjgtMi42OCw1LjY4LTUuOTdzLTIuNjQtNS45Mi01LjY3LTUuOTJaTTE1Ni44MiwzMy41OWMtMi4wNSwwLTMuNzItMS42Ny0zLjcyLTMuNzJzMS42Ny0zLjcyLDMuNzItMy43MiwzLjcyLDEuNjcsMy43MiwzLjcyLTEuNjcsMy43Mi0zLjcyLDMuNzJaIi8+CiAgPHBhdGggZD0iTTcxLjQ0LDIzLjkyYy0xLjI3LDAtMi4zMi40OS0zLjA5LDEuMjdoLS4zM3MuMzMtMS41NS4zMy0xLjU1di0zLjM5aC0yLjIzdjE1LjM3aDIuMjN2LTYuNjJjMC0xLjU3LDEuMjctMi44NSwyLjg0LTIuODVzMi44NCwxLjI4LDIuODQsMi44NXY2LjYyaDIuMjN2LTYuNjJjMC0yLjgtMi4wMi01LjA3LTQuODItNS4wN1oiLz4KICA8cmVjdCB4PSIxNS4zOSIgeT0iMTUuMzgiIHdpZHRoPSIyNi4yNCIgaGVpZ2h0PSI0Ljg2Ii8+CiAgPHJlY3QgeD0iMzEuNjYiIHk9IjIxLjg2IiB3aWR0aD0iOS45NyIgaGVpZ2h0PSI0Ljg2Ii8+CiAgPHBhdGggZD0iTTIxLjc2LDIxLjg2aC02LjM3djQuODZoNi4zN2MyLjM4LDAsNC4zMiwxLjk0LDQuMzIsNC4zMnYxMC41OGg0Ljg2di0xMC41OGMwLTUuMDYtNC4xMi05LjE4LTkuMTgtOS4xOFoiLz4KICA8cGF0aCBkPSJNMzYuNjUsMzMuNzhjLTIuMjUsMC00LjA4LDEuODMtNC4wOCw0LjA4czEuODMsNC4wOCw0LjA4LDQuMDgsNC4wOC0xLjgzLDQuMDgtNC4wOC0xLjgzLTQuMDgtNC4wOC00LjA4WiIvPgogIDxwYXRoIGQ9Ik0xMTQuNzEsMjUuMTZjMC0uNjktLjU2LTEuMjQtMS4yNC0xLjI0cy0xLjI0LjU2LTEuMjQsMS4yNGMwLC4wOS4wMy4xNi4wNS4yNC0uODktLjkxLTIuMTItMS40OC0zLjUtMS40OC0yLjY5LDAtNC44OSwyLjE5LTQuODksNC44OSwwLDEuMzUuNTUsMi41MSwxLjQzLDMuMzNsLS42Ny43MWMtLjc1Ljc2LS45NywxLjg5LS41NiwyLjg3LjQxLjk4LDEuMzcsMS42MiwyLjQzLDEuNjJoNC44NWMuNTcsMCwxLjAzLjQ2LDEuMDMsMS4wM3MtLjQ2LDEuMDMtMS4wMywxLjAzaC03LjgydjIuMjNoNy44MmMxLjgsMCwzLjI2LTEuNDYsMy4yNi0zLjI2cy0xLjQ2LTMuMjYtMy4yNi0zLjI2aC01LjUydi0uMzRsMS40OS0xLjU0Yy40NS4xMi45Mi4yMSwxLjQyLjIxLDIuNjksMCw0Ljg5LTEuOTQsNC44OS00LjYzLDAtLjkyLS4yNy0xLjc3LS43Mi0yLjUxLDAsMCwwLS4wMSwwLS4wMi4xNi4wOC4zNC4xMy41My4xMy42OSwwLDEuMjQtLjU2LDEuMjQtMS4yNFpNMTA4Ljc4LDMxLjQ3Yy0xLjQ3LDAtMi42Ny0xLjItMi42Ny0yLjY3czEuMi0yLjY3LDIuNjctMi42NywyLjY3LDEuMiwyLjY3LDIuNjctMS4yLDIuNjctMi42NywyLjY3WiIvPgogIDxwYXRoIGQ9Ik0xMzIuNjQsMjAuMjRoLTIuMjJ2My44NmgtMi44MnYyLjIyaDIuODJ2Ni4wMmMwLDEuOCwxLjQ3LDMuMjcsMy4yNywzLjI3aDEuODl2LTIuMjJoLTEuODljLS41OCwwLTEuMDUtLjQ3LTEuMDUtMS4wNXYtNi4wMmgyLjk0di0yLjIyaC0yLjk0di0zLjg2WiIvPgo8L3N2Zz4=",
+  "logo": "",
+  "palette": [
+   {
+    "name": "Dark Spot",
+    "hex": "#08062B",
+    "group": "primary",
+    "usage": "Default dark slide background; body text on light slides; base of background gradients"
+   },
+   {
+    "name": "Navy Spot",
+    "hex": "#1B3E61",
+    "group": "primary",
+    "usage": "Background fills and panels; gradient partner with Dark Spot"
+   },
+   {
+    "name": "Blue Spot",
+    "hex": "#346DC9",
+    "group": "primary",
+    "usage": "Accent, iconography and links on light slides; gradient stop with Cyan Spot"
+   },
+   {
+    "name": "Cyan Spot",
+    "hex": "#04D1FF",
+    "group": "primary",
+    "usage": "Accent on dark slides; end of White-to-Cyan headline gradient; highlights and icons"
+   },
+   {
+    "name": "White Spot",
+    "hex": "#FFFFFF",
+    "group": "primary",
+    "usage": "Text on dark slides; light slide background; start of headline gradient"
+   },
+   {
+    "name": "Navy Tint (#045D7F)",
+    "hex": "#045D7F",
+    "group": "secondary",
+    "usage": "Background elements and illustrations"
+   },
+   {
+    "name": "Blue Tint",
+    "hex": "#275595",
+    "group": "secondary",
+    "usage": "Background elements and illustrations"
+   },
+   {
+    "name": "Cyan Tint",
+    "hex": "#9FE9FF",
+    "group": "secondary",
+    "usage": "Background elements and illustrations"
+   },
+   {
+    "name": "Purple Spot",
+    "hex": "#3D2894",
+    "group": "secondary",
+    "usage": "Background gradient stop (Purple Spot to Dark Spot); illustrations"
+   },
+   {
+    "name": "Secondary #8AAFFF",
+    "hex": "#8AAFFF",
+    "group": "secondary",
+    "usage": "Background elements and illustrations"
+   },
+   {
+    "name": "White Tint",
+    "hex": "#EEF7FF",
+    "group": "secondary",
+    "usage": "Soft panels and background elements on light slides"
+   },
+   {
+    "name": "Blurple Spot",
+    "hex": "#714BFB",
+    "group": "secondary",
+    "usage": "Secondary accent; gradient stop with Cyan Spot for spot elements"
+   },
+   {
+    "name": "Navy Tint (#122246)",
+    "hex": "#122246",
+    "group": "secondary",
+    "usage": "Background elements and illustrations on dark slides"
+   },
+   {
+    "name": "Tertiary #32D9DF",
+    "hex": "#32D9DF",
+    "group": "tertiary",
+    "usage": "Small components of illustrations and diagrams only"
+   },
+   {
+    "name": "Tertiary #C493FF",
+    "hex": "#C493FF",
+    "group": "tertiary",
+    "usage": "Small components of illustrations and diagrams only"
+   },
+   {
+    "name": "Tertiary #FF92A8",
+    "hex": "#FF92A8",
+    "group": "tertiary",
+    "usage": "Small components of illustrations and diagrams only"
+   },
+   {
+    "name": "Tertiary #FFC052",
+    "hex": "#FFC052",
+    "group": "tertiary",
+    "usage": "Small components of illustrations and diagrams only"
+   },
+   {
+    "name": "Tertiary #6DD267",
+    "hex": "#6DD267",
+    "group": "tertiary",
+    "usage": "Small components of illustrations and diagrams only"
+   },
+   {
+    "name": "Headline Gradient Cyan",
+    "hex": "#00D2FF",
+    "group": "other",
+    "usage": "End stop of the H1 White-to-Cyan headline gradient as specified in typography"
+   },
+   {
+    "name": "CTA Black",
+    "hex": "#000000",
+    "group": "other",
+    "usage": "CTA text on light/cyan buttons"
+   },
+   {
+    "name": "Panel",
+    "hex": "#E6F8FF",
+    "group": "module",
+    "usage": "--panel in the module"
+   }
+  ],
+  "rules": [
+   "H1 headlines: Geist Mono Regular, Title Case, filled with a White (#FFFFFF) to Cyan (#00D2FF) gradient on dark backgrounds.",
+   "Tighten kerning on large Geist Mono headlines; it is monospace, so spaces and punctuation look too wide at scale.",
+   "Eyebrows: Geist Medium, UPPERCASE, placed above the headline.",
+   "H2/subheads: Geist Normal, sentence case.",
+   "Body copy: Geist Regular, sentence case, 150% line height.",
+   "CTAs and button labels: Geist Mono Regular, UPPERCASE; use #000000 text on light or Cyan Spot buttons.",
+   "Use primary colours for backgrounds, headlines, subheads, body copy, CTAs and icons.",
+   "Use secondary colours only for background elements and illustrations, never for body text.",
+   "Use tertiary colours only for small parts of illustrations or diagrams.",
+   "Use gradients to add depth to backgrounds: Purple Spot→Dark Spot or Navy Spot→Dark Spot; Blurple Spot→Cyan Spot or Cyan Spot→Blue Spot for spot elements and illustrations.",
+   "All text must reach at least 4.5:1 contrast with its background; do not set body text in Blurple, Purple or tertiary colours on Dark Spot.",
+   "Use the white primary logo on dark slides and the black primary logo on light slides; use only approved artwork.",
+   "Use the icon or stacked logo only when the primary logo does not fit; never use the app icon in place of the logo.",
+   "Keep clear space around the logo equal to the height of the 'T' on all sides, with no text, images or graphics inside it.",
+   "Never display the logo smaller than 25px tall.",
+   "Never stretch, rotate, recolour, outline, add effects to, retype or resize parts of the logo, and never use the icon as the letter T.",
+   "For partner co-branding, place the ThoughtSpot logo first, use monochrome logos for both, weight them equally and separate them using the clear space rule.",
+   "Icons should use brand colours and line-style artwork inspired by the logo."
+  ],
+  "kit_name": "ThoughtSpot Training Slides Brand Kit",
+  "reference": ""
+ },
+ "pronunciations": {
+  "R&D": "R and D",
+  "DSA": "D S A",
+  "ThoughtSpot": "Thought Spot",
+  "AI agents": "A I agents",
+  "HR": "H R"
+ }
+}

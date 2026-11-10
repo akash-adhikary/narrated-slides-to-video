@@ -106,6 +106,7 @@ directory. Each is a 48-second seamless loop at 48 kHz, synthesised in code. The
 |---|---|---|
 | `HTML2MP4_CACHE` | `~/.cache/html2mp4` | Where narration clips, music beds, rendered pictures and Studio state are kept. Safe to delete. |
 | `HTML2MP4_OUTPUT` | `~/Downloads/Narrated Videos` | Where the Studio saves finished videos. |
+| `HTML2MP4_BRAND` | (unset) | Set to `neutral` to start from the plain brand instead of the bundled ThoughtSpot one. |
 | `HTML2MP4_CONFIG` | `~/.config/html2mp4` | Settings: API key, brand kit, fonts, glossary. |
 | `HTML2MP4_MODULES` | `~/Downloads/Narrated Videos/Modules` | Where the Write page saves modules and their versions. |
 | `HTML2MP4_NO_BROWSER` | unset | If set, the Studio doesn't open a browser window on start. |

@@ -31,6 +31,26 @@ DEFAULT_BRAND = {
     "kit_name": "",
     "reference": "",                 # file name of the module used as a style reference
 }
+BUNDLED = pathlib.Path(__file__).parent / "defaults" / "thoughtspot"   # the brand a fresh install starts with
+
+
+def default_brand():
+    """The brand a fresh install starts with: the bundled ThoughtSpot kit, or the neutral one if HTML2MP4_BRAND=neutral."""
+    if os.environ.get("HTML2MP4_BRAND") == "neutral": return dict(DEFAULT_BRAND)
+    try: return {**DEFAULT_BRAND, **json.loads((BUNDLED / "brand.json").read_text())["brand"]}
+    except (OSError, ValueError, KeyError): return dict(DEFAULT_BRAND)
+
+
+def install_default_fonts():
+    """Copy the bundled typefaces into the config folder once, so they are available like any imported kit font."""
+    src, dst = BUNDLED / "fonts", CONFIG_DIR / "fonts"
+    if os.environ.get("HTML2MP4_BRAND") == "neutral" or not (src / "fonts.json").exists() or (dst / "fonts.json").exists(): return
+    try:
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in src.iterdir(): (dst / f.name).write_bytes(f.read_bytes())
+    except OSError: pass
+
+
 KIT_FIELDS = ("palette", "rules", "kit_name", "reference", "logo", "logo_on_dark", "logo_on_light")
 LOGO_MAX_BYTES = 512 * 1024
 
@@ -40,7 +60,8 @@ def load():
         data = json.loads(SETTINGS_FILE.read_text())
     except (FileNotFoundError, ValueError):
         data = {}
-    data["brand"] = {**DEFAULT_BRAND, **data.get("brand", {})}
+    if "brand" not in data: install_default_fonts()
+    data["brand"] = {**default_brand(), **data["brand"]} if "brand" in data else default_brand()
     return data
 
 
@@ -110,10 +131,20 @@ def set_motion(value):
 DEFAULT_GLOSSARY = {"pronunciations": {}, "banned": [], "approved": []}
 
 
+def default_pronunciations():
+    if os.environ.get("HTML2MP4_BRAND") == "neutral": return {}
+    try: return dict(json.loads((BUNDLED / "brand.json").read_text()).get("pronunciations", {}))
+    except (OSError, ValueError): return {}
+
+
 def glossary():
-    """Pronunciations ({written: spoken}), banned terms (the designer must not use them) and approved terms."""
-    g = load().get("glossary", {})
-    return {k: g.get(k, v) for k, v in DEFAULT_GLOSSARY.items()}
+    """Pronunciations ({written: spoken}), banned terms (the designer must not use them) and approved terms.
+    Until the glossary is first saved, pronunciations start from the bundled brand's list."""
+    saved = load().get("glossary")
+    g = saved or {}
+    out = {k: g.get(k, v) for k, v in DEFAULT_GLOSSARY.items()}
+    if saved is None: out["pronunciations"] = default_pronunciations()
+    return out
 
 
 def set_glossary(changes):
@@ -170,6 +201,6 @@ def logo_for(b):
 
 
 def reset_brand():
-    data = load(); data["brand"] = dict(DEFAULT_BRAND); save(data)
+    data = load(); data["brand"] = default_brand(); save(data)
     (CONFIG_DIR / "reference.html").unlink(missing_ok=True)
     return data["brand"]

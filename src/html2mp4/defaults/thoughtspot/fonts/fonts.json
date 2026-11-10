@@ -1,0 +1,28 @@
+[
+ {
+  "family": "Geist",
+  "files": [
+   {
+    "family": "Geist",
+    "file": "Geist-VariableFont_wght.ttf",
+    "weight": "100 900",
+    "italic": false,
+    "variable": true
+   }
+  ],
+  "variable": true
+ },
+ {
+  "family": "Geist Mono",
+  "files": [
+   {
+    "family": "Geist Mono",
+    "file": "GeistMono-VariableFont_wght.ttf",
+    "weight": "100 900",
+    "italic": false,
+    "variable": true
+   }
+  ],
+  "variable": true
+ }
+]
