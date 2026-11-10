@@ -123,6 +123,15 @@ def partial_reply(text):
     return "".join(out)
 
 
+def slide_blocks(text):
+    """The `## Slide` blocks of a script, one string each, and the title part before the first one: (head, [blocks])."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    if any(script.SCENE.match(l.strip()) for l in lines): raise ValueError("This script uses the Scene format, which can't be split into slides this way.")
+    starts = [i for i, l in enumerate(lines) if l.startswith("## ")]
+    head = "\n".join(lines[:starts[0]] if starts else lines).strip("\n")
+    return head, ["\n".join(lines[a:b]).strip("\n") for a, b in zip(starts, starts[1:] + [len(lines)])]
+
+
 def apply_edits(current, edits):
     """Apply slide-level edits to a script in the `## Slide` format. Ids refer to the script as it is before any edit.
     Raises ValueError, in words Claude can act on, when an edit can't be applied."""

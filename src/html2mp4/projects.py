@@ -127,7 +127,7 @@ def set_script(pid, script_text):
     return p
 
 
-def save_version(pid, html, slides, note, cost=0.0, issues=(), script_text=None, mode="design", at=None):
+def save_version(pid, html, slides, note, cost=0.0, issues=(), script_text=None, mode="design", at=None, label=None):
     """Store a new version and make it current. `slides` is the per-slide design (None for the basic layout)."""
     p = _read(pid); n = (p["versions"][-1]["n"] + 1) if p["versions"] else 1
     f = folder(pid); (f / "versions").mkdir(exist_ok=True)
@@ -135,7 +135,7 @@ def save_version(pid, html, slides, note, cost=0.0, issues=(), script_text=None,
     (f / "versions" / f"v{n}.json").write_text(json.dumps({"slides": slides, "script": script_text if script_text is not None else p["script"]}))
     (f / "module.html").write_text(html, encoding="utf-8")
     p["versions"].append({"n": n, "at": at or time.time(), "note": note, "cost": round(cost, 3), "mode": mode,
-                          "issues": [i if isinstance(i, dict) else i.to_dict() for i in issues]})
+                          "issues": [i if isinstance(i, dict) else i.to_dict() for i in issues], **({"label": label} if label else {})})
     p["current"] = n; p["updated"] = time.time()
     if script_text is not None: p["script"] = script_text; p["draft"] = None; (f / "script.txt").write_text(script_text)
     _write(p)
@@ -160,6 +160,25 @@ def slides(pid, n=None):
     p = _read(pid); n = n or p["current"]
     try: return json.loads((folder(pid) / "versions" / f"v{n}.json").read_text()).get("slides") or {}
     except (FileNotFoundError, ValueError): return {}
+
+
+def kind_of(note):
+    """Where a version came from, read from its note: restore, import, assistant, script, quick or design."""
+    n = (note or "").lower()
+    for start, kind in (("restored", "restore"), ("imported", "import"), ("assistant", "assistant"), ("script edited", "script"), ("quick layout", "quick")):
+        if n.startswith(start): return kind
+    return "design"
+
+
+def set_label(pid, n, label):
+    """Give a version a name of your own (empty clears it)."""
+    p = _read(pid); label = re.sub(r"\s+", " ", str(label or "")).strip()
+    if len(label) > 60: raise ValueError("Keep the name to 60 characters or fewer.")
+    v = next((v for v in p["versions"] if v["n"] == int(n)), None)
+    if v is None: raise ValueError("That version doesn't exist.")
+    if label: v["label"] = label
+    else: v.pop("label", None)
+    _write(p); return p
 
 
 def version_script(pid, n):

@@ -196,7 +196,9 @@ async function openProject(pid, version){
 function showFrame(){
   const f = $("#rvFrame");
   f.onload = () => { const r = W.rows && W.rows[0]; if(r) f.contentWindow.postMessage({html2mp4: "go", pos: r.last}, "*"); };
-  f.src = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}&t=${Date.now()}`;
+  const url = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}&t=${Date.now()}`;
+  try{ if(f.contentWindow && f.contentWindow.location.pathname.startsWith("/api/")) f.contentWindow.location.replace(url); else f.src = url; }   // replace: the preview changing must not add a step to the Back button
+  catch{ f.src = url; }
   $("#rvOpen").href = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}`;
   $("#rvDownload").href = `/api/projects/${W.project}/download?v=${W.version}`;
   $("#rvFile").href = `/api/projects/${W.project}/export?v=${W.version}`;
@@ -252,7 +254,9 @@ function showModule(p){
   document.body.dataset.module = p.id; if(typeof switchChat === "function") switchChat();
   $("#wHero").hidden = true; $("#wHead").hidden = false; $("#cardScript").hidden = false;
   setHead(p);
-  if(document.body.dataset.page === "write" && location.hash !== `#write/${encodeURIComponent(p.id)}`) history.replaceState(null, "", `#write/${encodeURIComponent(p.id)}`);
+  const want = `#write/${encodeURIComponent(p.id)}` + (p.viewing ? `/v${p.version}` : "");                  // a version has its own address
+  if(document.body.dataset.page === "write" && location.hash !== want) history[W.pushHash ? "pushState" : "replaceState"](null, "", want);   // switching versions is a step the Back button can undo
+  W.pushHash = false;
   document.querySelector('.tabs a[data-page="write"]').setAttribute("href", `#write/${encodeURIComponent(p.id)}`);   // the Write tab goes back to this module
 }
 const when = t => new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
@@ -277,27 +281,71 @@ function setHead(p){
   updateButtons();
   if(typeof render === "function"){ if(p.viewing && C.open) setOpen(false); render(); }       // the assistant can't edit an old version, so it gets out of the way
 }
+const KIND = {design: ["◆", "Designed with Claude"], quick: ["▦", "Quick layout"], script: ["✎", "Script edited"], assistant: ["✦", "Made with the assistant"], restore: ["↺", "Restored"], import: ["⇩", "Imported"]};
 function renderVersionMenu(p){
-  const rows = [...p.versions].reverse().map(v => `<button type="button" class="vrow" role="menuitem" data-n="${v.n}" ${v.n === p.version ? 'aria-current="true"' : ""}>
-    <span class="vt"><b>v${v.n}</b><span class="vn">${esc(v.note || "Version " + v.n)}</span>${v.n === p.current ? `<span class="vtag">current</span>` : ""}</span>
-    <small>${esc(when(v.at))}${v.cost ? ` · about $${v.cost.toFixed(2)}` : ""}</small></button>`).join("");
-  const draftRow = p.has_draft ? `<div class="vrow draft"><span class="vt"><b>Draft</b><span class="vn">Script changes not designed yet</span></span><small>${p.viewing ? "Waiting for you in the current version" : "Update slides to save them as a version"}</small></div>` : "";
-  $("#verMenu").innerHTML = `<div class="menu-h">Version history</div>${draftRow}${rows}`;
+  const rows = [...p.versions].reverse().map(v => {
+    const [glyph, what] = KIND[v.kind] || KIND.design;
+    return `<button type="button" class="vrow" role="menuitem" data-n="${v.n}" ${v.n === p.version ? 'aria-current="true"' : ""}>
+    <span class="vt"><span class="vi" title="${what}" aria-label="${what}">${glyph}</span><b>v${v.n}</b><span class="vn">${v.label ? `<em>${esc(v.label)}</em>` : esc(v.note || "Version " + v.n)}</span>${v.n === p.current ? `<span class="vtag">current</span>` : ""}</span>
+    <small>${v.label && v.note ? `${esc(v.note)} · ` : ""}${esc(when(v.at))}${v.cost ? ` · about $${v.cost.toFixed(2)}` : ""}</small></button>`; }).join("");
+  const draftRow = p.has_draft ? `<div class="vrow draft"><span class="vt"><span class="vi" aria-hidden="true">…</span><b>Draft</b><span class="vn">Script changes not designed yet</span></span><small>${p.viewing ? "Waiting for you in the current version" : "Update slides to save them as a version"}</small></div>` : "";
+  const shown = p.versions.find(v => v.n === p.version) || {};
+  $("#verMenu").innerHTML = `<div class="menu-h">Version history</div>${draftRow}${rows}
+    <form class="vname" id="vName"><input maxlength="60" aria-label="Name for version ${p.version}" placeholder="Name version ${p.version}…" value="${esc(shown.label || "")}"><button class="link" type="submit">Save</button></form>`;
 }
 $("#verMenu").addEventListener("click", e => {
   const b = e.target.closest(".vrow[data-n]"); if(!b) return;
   $("#verSel").open = false;
   if(W.busy){ toast("Claude is still designing. Try again when it finishes."); return; }
   const n = +b.dataset.n; if(n === W.version) return;
-  openProject(W.project, n === W.current.current ? undefined : n).catch(err => toast(err.message));
+  W.pushHash = true; openProject(W.project, n === W.current.current ? undefined : n).catch(err => toast(err.message));
 });
-$("#verBack").addEventListener("click", () => openProject(W.project));
-$("#verRestore").addEventListener("click", async () => {
+$("#verMenu").addEventListener("submit", async e => {                                   // give the version you're on a name of your own
+  e.preventDefault(); if(e.target.id !== "vName") return;
   try{
-    const n = W.version; await post(`/api/projects/${W.project}/restore`, {version: n}); await openProject(W.project); loadModules();
+    const r = await post(`/api/projects/${W.project}/versions/${W.version}`, {label: e.target.querySelector("input").value}, "PATCH");
+    W.current.versions.find(v => v.n === W.version).label = r.label; renderVersionMenu(W.current); toast(r.label ? "Version named" : "Name removed");
+  }catch(err){ toast(err.message); }
+});
+$("#verBack").addEventListener("click", () => { W.pushHash = true; openProject(W.project); });
+$("#verRestore").addEventListener("click", async () => {
+  if(W.current.has_draft && !confirm("Restoring replaces the script changes you haven't designed yet. Restore anyway?")) return;
+  try{
+    const n = W.version; await post(`/api/projects/${W.project}/restore`, {version: n}); W.pushHash = true; await openProject(W.project); loadModules();
     toast(`Version ${n} is current again, saved as version ${W.current.current}.`);
   }catch(err){ toast(err.message); }
 });
+
+/* ---------- compare an earlier version with the current one, and take single slides back ---------- */
+const TAGS = {changed: "Changed", removed: "Removed since"};
+$("#verCompare").addEventListener("click", async () => {
+  const dlg = $("#cmpDlg"), a = W.version;
+  $("#cmpH").textContent = `Version ${a} compared with the current version`; $("#cmpSub").textContent = "";
+  $("#cmpSlides").innerHTML = `<li class="quiet">Loading…</li>`; $("#cmpScript").innerHTML = ""; $("#cmpNote").textContent = "";
+  dlg.showModal();
+  try{
+    const c = await api(`/api/projects/${W.project}/compare?a=${a}`); W.cmp = c;
+    $("#cmpSub").textContent = `Version ${c.a} is the older one. Version ${c.b} is current.`;
+    const same = c.slides.filter(s => s.status === "same").length;
+    const can = r => r.restorable && !c.has_draft;
+    $("#cmpSlides").innerHTML = c.slides.filter(s => s.status !== "same").map(s => `<li><span class="cmp-tag ${s.status}">${TAGS[s.status]}</span><span class="t">${esc(s.title)}</span>
+        ${can(s) ? `<button class="link" type="button" data-slide="${s.id}">Take this slide back</button>` : ""}</li>`).join("")
+      + c.added.map(s => `<li><span class="cmp-tag added">Added since</span><span class="t">${esc(s.title)}</span></li>`).join("")
+      + `<li class="quiet">${same} slide${same === 1 ? "" : "s"} unchanged</li>`;
+    $("#cmpNote").textContent = c.reason || (c.has_draft ? "You have script changes that aren't in the slides yet. Update the slides first, then you can take single slides back." : "Taking a slide back brings its words and its design, saved as a new version. Nothing else changes, and Claude isn't used.");
+    $("#cmpScript").innerHTML = c.script.map(r => r.op === "gap" ? `<div class="d gap">⋯ ${r.n} unchanged lines</div>` : `<div class="d ${r.op}">${r.op === "del" ? "− " : r.op === "add" ? "+ " : "  "}${esc(r.text)}</div>`).join("") || `<div class="d gap">The scripts are the same.</div>`;
+  }catch(err){ dlg.close(); toast(err.message); }
+});
+$("#cmpSlides").addEventListener("click", async e => {
+  const b = e.target.closest("[data-slide]"); if(!b || !W.cmp) return;
+  b.disabled = true; b.textContent = "Taking it back…";
+  try{
+    const v = await post(`/api/projects/${W.project}/restore-slide`, {version: W.cmp.a, slide: b.dataset.slide});
+    $("#cmpDlg").close(); W.pushHash = true; await openProject(W.project); loadModules(); toast(`Slide brought back from version ${W.cmp.a}, saved as version ${v.current}.`);
+  }catch(err){ b.disabled = false; b.textContent = "Take this slide back"; toast(err.message); }
+});
+$("#cmpClose").addEventListener("click", () => $("#cmpDlg").close());
+$("#cmpDlg").addEventListener("click", e => { if(e.target === e.currentTarget) e.currentTarget.close(); });
 function showHome(){
   clearTimeout(W.parseTimer); W.project = null; W.current = null; W.designed = false; W.outline = null; box.value = ""; W.saved = "";
   W.viewing = null; box.readOnly = false; document.body.removeAttribute("data-viewing"); $("#verBar").hidden = true;
@@ -362,12 +410,13 @@ $("#modList").addEventListener("click", async e => {
 });
 
 /* ---------- start ---------- */
-pageHooks.write = async arg => {
+pageHooks.write = async (arg, ver) => {
   const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced";
   if(arg){
-    if(arg !== W.project){
-      try{ await openProject(arg); }
-      catch{ toast("That module wasn't found."); location.hash = "#write"; return; }
+    const want = /^v\d+$/.test(ver || "") ? +ver.slice(1) : undefined;                // #write/<id>/v2 opens version 2 of the module
+    if(arg !== W.project || (want || null) !== (W.viewing || null)){
+      try{ await openProject(arg, want); }
+      catch{ toast(want ? "That version wasn't found." : "That module wasn't found."); location.hash = want ? `#write/${encodeURIComponent(arg)}` : "#write"; return; }
     }
     updateButtons(); loadModules();
     if(W.focusScript){ W.focusScript = false; box.focus(); box.setSelectionRange(box.value.length, box.value.length); }      // a module you just named: start writing

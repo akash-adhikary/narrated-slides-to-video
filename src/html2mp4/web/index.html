@@ -50,7 +50,15 @@
       <button class="link" type="button" id="wNew">New module</button></div>
   </nav>
   <div class="verbar" id="verBar" role="status" hidden><span id="verBarText"></span>
-    <button class="btn-2" type="button" id="verRestore">Restore this version</button><button class="link" type="button" id="verBack">Back to current</button></div>
+    <button class="link" type="button" id="verCompare">Compare with current</button><button class="btn-2" type="button" id="verRestore">Restore this version</button><button class="link" type="button" id="verBack">Back to current</button></div>
+
+  <dialog class="cmpdlg" id="cmpDlg" aria-labelledby="cmpH">
+    <header class="cmp-h"><div><h2 id="cmpH">Compare</h2><p id="cmpSub"></p></div><button class="link" type="button" id="cmpClose">Close</button></header>
+    <div class="cmp-body">
+      <section><h3>Slides</h3><ul class="cmp-slides" id="cmpSlides"></ul><p class="cmp-note" id="cmpNote"></p></section>
+      <section><h3>Script <small>− only in the older version · + only in the current one</small></h3><div class="cmp-diff" id="cmpScript" tabindex="0"></div></section>
+    </div>
+  </dialog>
 
   <section class="card" id="cardScript" aria-labelledby="hScript" hidden>
     <div class="card-h"><span class="num">1</span><h2 id="hScript">Your script</h2><p id="wStats"></p></div>

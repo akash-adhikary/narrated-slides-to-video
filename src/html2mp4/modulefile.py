@@ -8,7 +8,7 @@ Written as JSON (`.h2m.json`), or as the same data in YAML (`.h2m.yaml`) for rea
     brand               the look it was made with (colours and fonts; a reference, never applied on import)
     pronunciations      the spoken forms the script uses
     current             the version number the file opens on
-    versions            [{n, at, note, mode, script, slides, html}]; one for a plain export, all of them with history
+    versions            [{n, at, note, label?, mode, script, slides, html}]; one for a plain export, all of them with history
     integrity           a checksum of the above, so a hand edit is noticed (it is never refused for it)
 """
 import hashlib, json, re, time
@@ -48,7 +48,7 @@ def build(pid, version=None, history=False):
         n = v["n"]
         try: data = json.loads((projects.folder(pid) / "versions" / f"v{n}.json").read_text())
         except (FileNotFoundError, ValueError): data = {}
-        versions.append({"n": n, "at": v["at"], "note": v.get("note", ""), "mode": v.get("mode", "design"),
+        versions.append({"n": n, "at": v["at"], "note": v.get("note", ""), "mode": v.get("mode", "design"), **({"label": v["label"]} if v.get("label") else {}),
                          "script": data.get("script", p["script"]), "slides": data.get("slides"), "html": projects.version_html(pid, n)})
     script_text = next((v["script"] for v in versions if v["n"] == cur), projects.working_script(p))
     try: title = script_parser.parse(script_text).title

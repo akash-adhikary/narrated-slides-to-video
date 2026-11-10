@@ -658,7 +658,7 @@ def project_view(pid, version=None):
     return {**{k: p[k] for k in ("id", "name", "created", "updated", "current", "feedback")}, "title": title, "script": shown,
             "version": n, "viewing": viewing, "has_draft": p.get("draft") is not None,
             "designed_script": p["script"] if p["versions"] else "",
-            "versions": [{k: v[k] for k in ("n", "at", "note", "cost", "mode")} for v in p["versions"]],
+            "versions": [{k: v[k] for k in ("n", "at", "note", "cost", "mode")} | {"label": v.get("label", ""), "kind": projects.kind_of(v.get("note"))} for v in p["versions"]],
             "issues": (cur or {}).get("issues", []), "outline": outl,
             "slides": {k: {"layout": v["layout"], "summary": v["summary"]} for k, v in projects.slides(pid, n).items()}}
 
@@ -797,7 +797,7 @@ def import_module_file(text):
         is_current = v["n"] == doc.get("current")
         found = verify.inspect(v["html"], m, config.glossary()["banned"], shots=False)["issues"] if is_current else []   # the others are history
         note = (v.get("note") or "Imported from a file") if len(versions) > 1 else "Imported from a file" + (" (changed outside the Studio)" if got["edited"] else "")
-        projects.save_version(p["id"], v["html"], slides, note, issues=found, script_text=v.get("script") or doc["script"],
+        projects.save_version(p["id"], v["html"], slides, note, issues=found, script_text=v.get("script") or doc["script"], label=v.get("label") if isinstance(v.get("label"), str) else None,
                               mode=v.get("mode") if v.get("mode") in ("design", "basic") else ("design" if slides else "basic"),
                               at=v.get("at") if isinstance(v.get("at"), (int, float)) else None)
     if versions:
@@ -1034,6 +1034,103 @@ class RestoreIn(BaseModel):
 def restore(pid: str, body: RestoreIn):
     try: projects.restore(pid, body.version)
     except ValueError as e: raise HTTPException(400, str(e))
+    return project_view(pid)
+
+
+class LabelIn(BaseModel):
+    label: str = ""
+
+
+@app.patch("/api/projects/{pid}/versions/{n}")
+def label_version(pid: str, n: int, body: LabelIn):
+    """Name a version ("Sent to legal"); an empty name clears it."""
+    if not projects.get(pid): raise HTTPException(404, "That module wasn't found.")
+    try: p = projects.set_label(pid, n, body.label)
+    except ValueError as e: raise HTTPException(400, str(e))
+    return {"n": n, "label": next(v for v in p["versions"] if v["n"] == n).get("label", "")}
+
+
+def _diff_rows(old_lines, new_lines, context=2):
+    """A readable line diff: lines only in the old text ("del"), only in the new ("add"), and a little context around them."""
+    import difflib
+    rows = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes():
+        if op == "equal":
+            keep = old_lines[i1:i2]
+            if len(keep) > 2 * context + 2:
+                rows += [{"op": "same", "text": t} for t in keep[:context]] + [{"op": "gap", "n": len(keep) - 2 * context}] + [{"op": "same", "text": t} for t in keep[-context:]]
+            else: rows += [{"op": "same", "text": t} for t in keep]
+        else:
+            rows += [{"op": "del", "text": t} for t in old_lines[i1:i2]] + [{"op": "add", "text": t} for t in new_lines[j1:j2]]
+    return rows
+
+
+def _slide_state(pid, a):
+    """How the slides of version `a` relate to the current version's: each is the same, changed or gone since, and which can be taken back."""
+    p = projects.get(pid)
+    cur_text = projects.version_script(pid, p["current"]) or p["script"]
+    a_text = projects.version_script(pid, a)
+    if a_text is None: raise HTTPException(404, "That version doesn't exist.")
+    old, new = script.parse(cur_text), script.parse(a_text)
+    remap, changed = align_slides(cur_text, a_text)                       # version a's slide id -> the current one it matches
+    reason = ""
+    try: chat.slide_blocks(a_text); chat.slide_blocks(cur_text)
+    except ValueError as e: reason = str(e)
+    if not reason and not (projects.slides(pid, a) and projects.slides(pid, p["current"])): reason = "A quick layout has no separate slide designs to take back. Restore the whole version instead."
+    rows = [{"id": "s0", "title": "Title slide", "status": "changed" if "s0" in changed else "same", "now": "s0"}]
+    for i, sl in enumerate(new.slides, 1):
+        sid = f"s{i}"
+        rows.append({"id": sid, "title": sl.title, "status": "removed" if sid not in remap else "changed" if sid in changed else "same", "now": remap.get(sid)})
+    mapped = set(remap.values())
+    added = [{"id": f"s{i}", "title": sl.title} for i, sl in enumerate(old.slides, 1) if f"s{i}" not in mapped]
+    return {"p": p, "cur_text": cur_text, "a_text": a_text, "remap": remap, "changed": changed, "rows": rows, "added": added, "reason": reason}
+
+
+@app.get("/api/projects/{pid}/compare")
+def compare_version(pid: str, a: int):
+    """What differs between an earlier version and the current one: the script line by line, and slide by slide."""
+    if not projects.get(pid): raise HTTPException(404, "That module wasn't found.")
+    st = _slide_state(pid, a)
+    return {"a": a, "b": st["p"]["current"], "script": _diff_rows(st["a_text"].splitlines(), st["cur_text"].splitlines()),
+            "slides": [{**r, "restorable": not st["reason"] and r["status"] != "same"} for r in st["rows"]], "added": st["added"], "reason": st["reason"],
+            "has_draft": st["p"].get("draft") is not None}
+
+
+class RestoreSlideIn(BaseModel):
+    version: int
+    slide: str
+
+
+@app.post("/api/projects/{pid}/restore-slide")
+def restore_slide(pid: str, body: RestoreSlideIn):
+    """Take one slide (its words and its design) back from an earlier version, as a new version. No Claude call: the slide's saved
+    design comes back as it was, and the checker looks over the result."""
+    if not projects.get(pid): raise HTTPException(404, "That module wasn't found.")
+    st = _slide_state(pid, body.version); p = st["p"]
+    if st["reason"]: raise HTTPException(400, st["reason"])
+    if p.get("draft") is not None: raise HTTPException(409, "You have script changes that aren't in the slides yet. Update the slides (or undo those changes) first.")
+    row = next((r for r in st["rows"] if r["id"] == body.slide), None)
+    if row is None: raise HTTPException(400, "That slide isn't in that version.")
+    if row["status"] == "same": raise HTTPException(400, "That slide is already the same in the current version.")
+    head, blocks = chat.slide_blocks(st["a_text"])
+    if body.slide == "s0": edits = [{"slide": "s0", "op": "header", "text": head}]
+    elif row["status"] == "changed": edits = [{"slide": row["now"], "op": "replace", "text": blocks[int(body.slide[1:]) - 1]}]
+    else:
+        n = int(body.slide[1:])
+        after = next((st["remap"][f"s{k}"] for k in range(n - 1, 0, -1) if f"s{k}" in st["remap"]), "s0")        # after the slide that came before it
+        edits = [{"slide": after, "op": "insert_after", "text": blocks[n - 1]}]
+    try: new_text = chat.apply_edits(st["cur_text"], edits); m = script.parse(new_text)
+    except (ValueError, script.ScriptError) as e: raise HTTPException(400, f"That slide couldn't be put back: {e}")
+    cur_slides, old_slides = projects.slides(pid), projects.slides(pid, body.version)
+    remap, changed = align_slides(st["cur_text"], new_text)               # the new script's slide id -> the current one it was
+    slides = {nid: remap_design(cur_slides[oid], oid, nid) for nid, oid in remap.items() if oid in cur_slides and nid not in changed}
+    for nid in [c for c in changed if c != "s0"]:                         # the slide that came back brings its own design
+        if body.slide not in old_slides: raise HTTPException(400, "That slide's design wasn't saved.")
+        slides[nid] = remap_design(old_slides[body.slide], body.slide, nid)
+    with design_lock:
+        page, issues, _ = design._check(m, config.brand(), slides, config.glossary()["banned"], config.motion(), new_text, config.glossary())
+        if not page: raise HTTPException(400, "The slides didn't assemble: " + "; ".join(i.message for i in issues[:3]))
+        projects.save_version(pid, page, slides, f"Restored “{row['title']}” from version {body.version}", issues=issues, script_text=new_text, mode="design")
     return project_view(pid)
 
 

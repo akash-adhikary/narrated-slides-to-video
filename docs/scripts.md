@@ -198,6 +198,15 @@ read-only: the script box, Design, the assistant and "make the video" are switch
   (history lists it as **Draft**).
 - **Restore this version** makes that version current again by saving it as a new version, so the history only ever grows.
 - **Share** (also in the header) exports the version you are viewing; "with history" always includes all of them.
+- **Name a version** ("Sent to legal") with the box at the bottom of the history; the name shows in bold, the note stays under it, and it
+  travels in the module file. A small icon on each row says where it came from: designed with Claude, quick layout, script
+  edited, the assistant, restored or imported.
+- **Compare with current** (in the banner) shows, side by side, which slides are changed, removed or added since that version and the
+  script line by line (lines only in the older version in red, only in the current one in green).
+- **Take this slide back** (in Compare) brings one slide, its words and its saved design, back from the older version as a new
+  version. Nothing else changes and Claude isn't used, so it's instant and free. It needs a designed module (not a quick layout) and
+  no script changes waiting to be designed; a slide that was deleted returns where it used to be.
+- Every version has an address: `#write/<id>/v2`. The Back button undoes a version switch, and a link or reload opens that exact version.
 
 **Editing the script** and clicking **Update slides** redesigns only the slides whose text changed. The others stay
 exactly as they were.

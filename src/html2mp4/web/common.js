@@ -11,14 +11,14 @@ addEventListener("scroll", () => $("#top").classList.toggle("scrolled", scrollY 
 const PAGES = ["write", "create", "settings"];
 const pageHooks = {};                       // page name -> function run when the page is shown
 function route(){
-  const [h, arg] = (location.hash.slice(1) || "write").split("/");          // #write/<module id> opens that module
+  const [h, arg, ver] = (location.hash.slice(1) || "write").split("/");     // #write/<module id>[/v<n>] opens that module, at that version
   const page = PAGES.includes(h) ? h : "create";
   document.body.dataset.page = page;
   document.querySelectorAll(".page").forEach(p => p.hidden = p.id !== `page-${page}`);
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.page === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   if(h === "library") setTimeout(() => $("#library").scrollIntoView({behavior:"smooth"}), 50);
   else scrollTo({top:0});
-  pageHooks[page]?.(arg ? decodeURIComponent(arg) : "");
+  pageHooks[page]?.(arg ? decodeURIComponent(arg) : "", ver || "");
 }
 addEventListener("hashchange", route);
 addEventListener("DOMContentLoaded", route);

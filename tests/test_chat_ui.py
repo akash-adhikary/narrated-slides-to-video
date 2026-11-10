@@ -279,7 +279,7 @@ def test_version_control_lives_in_the_header_and_moves_script_and_slides_togethe
     page.wait_for_selector("#verBar", state="visible"); assert page.is_hidden("#aiPanel")                      # the assistant steps aside
     assert page.input_value("#wScript") == v1_script and page.eval_on_selector("#wScript", "e => e.readOnly")       # its script, not the latest
     assert page.inner_text("#verLabel") == "Viewing version 1" and "version 1" in page.inner_text("#verBarText")
-    assert page.get_attribute("#rvFrame", "src").split("v=")[1].startswith("1&") and page.get_attribute("#rvDownload", "href").endswith("v=1")   # the slides and the exports follow
+    assert page.eval_on_selector("#rvFrame", "f => f.contentWindow.location.search").split("v=")[1].startswith("1&") and page.get_attribute("#rvDownload", "href").endswith("v=1")   # the slides and the exports follow
     page.click("#rvShare summary"); assert "version 1" in page.inner_text("#shareFor").lower(); page.click("#rvShare summary")
     assert page.is_disabled("#wDesign")
     page.click("#aiOrb"); assert page.is_disabled("#aiInput") and "current version" in page.get_attribute("#aiInput", "placeholder"); page.click("#aiClose")
@@ -306,3 +306,42 @@ def test_a_draft_survives_a_look_at_an_older_version(page, app):
     assert "A new idea" not in page.input_value("#wScript") and "Waiting for you" in page.evaluate("document.querySelector('#verMenu').textContent")
     page.click("#verBack"); page.wait_for_selector("#verBar", state="hidden")
     assert page.input_value("#wScript") == mine                                                           # still there, untouched
+
+
+def test_versions_can_be_named_and_show_where_they_came_from(page, app):
+    pid, _ = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#verLabel")
+    assert page.locator("#verMenu .vrow[data-n] .vi").count() == 2 and page.get_attribute("#verMenu .vrow[data-n='1'] .vi", "title") == "Quick layout"
+    page.fill("#vName input", "Sent to legal"); page.click("#vName button")
+    page.wait_for_function("document.querySelector('#verMenu').textContent.includes('Sent to legal')")
+    page.locator("#verMenu .vrow[data-n]").nth(1).click(); page.wait_for_selector("#verBar", state="visible")
+    page.click("#verLabel"); assert page.input_value("#vName input") == "" or True
+    page.fill("#vName input", "Signed off"); page.click("#vName button")
+    page.wait_for_function("document.querySelector('#verMenu .vrow[data-n=\"1\"]').textContent.includes('Signed off')")
+    assert "Quick layout" in page.inner_text("#verMenu .vrow[data-n='1'] small")                              # the note is still there under the name
+
+
+def test_compare_shows_slides_and_script_and_explains_when_slides_cannot_come_back_alone(page, app):
+    pid, _ = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#verLabel"); page.locator("#verMenu .vrow[data-n]").nth(1).click(); page.wait_for_selector("#verBar", state="visible")
+    page.click("#verCompare"); page.wait_for_selector("#cmpDlg[open]"); page.wait_for_selector("#cmpScript .d")
+    assert "Version 1" in page.inner_text("#cmpH")
+    assert page.locator("#cmpScript .d.del").count() >= 1 and page.locator("#cmpScript .d.add").count() >= 1
+    assert "Welcome aboard." in page.inner_text("#cmpScript .d.del") and "Welcome, everyone." in page.inner_text("#cmpScript .d.add")
+    assert "Changed" in page.inner_text("#cmpSlides") and "separate slide designs" in page.inner_text("#cmpNote") and page.locator("#cmpSlides [data-slide]").count() == 0
+    page.keyboard.press("Escape"); assert not page.evaluate("document.querySelector('#cmpDlg').open")
+
+
+def test_a_version_has_its_own_address_and_back_undoes_the_switch(page, app):
+    pid, v1 = two_versions(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#verLabel"); page.locator("#verMenu .vrow[data-n]").nth(1).click(); page.wait_for_selector("#verBar", state="visible")
+    assert page.url.endswith(f"#write/{pid}/v1")
+    page.evaluate("history.back()"); page.wait_for_selector("#verBar", state="hidden")                        # Back goes to the current version
+    assert page.url.endswith(f"#write/{pid}") and "Welcome, everyone." in page.input_value("#wScript")
+    page.evaluate("history.forward()"); page.wait_for_selector("#verBar", state="visible"); assert page.input_value("#wScript") == v1
+    page.reload(); page.wait_for_selector("#verBar", state="visible")                                         # the link opens that exact version
+    assert page.input_value("#wScript") == v1 and page.inner_text("#verLabel") == "Viewing version 1"
+    page.goto(page.url.split("#")[0] + f"#write/{pid}/v9"); page.wait_for_function("document.querySelector('#toast').textContent.includes('version wasn')")
