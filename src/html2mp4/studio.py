@@ -342,7 +342,14 @@ def verify_key(key=None):
 @app.get("/api/settings")
 def get_settings():
     return {"api_key": config.api_key_status(), "brand": config.brand(), "fonts": config.available_fonts(),
-            "design_quality": config.design_quality()}
+            "design_quality": config.design_quality(), "motion": config.motion()}
+
+
+@app.put("/api/settings/motion")
+def put_motion(body: dict):
+    try: config.set_motion(body.get("value", ""))
+    except ValueError as e: raise HTTPException(400, str(e))
+    return {"motion": config.motion()}
 
 
 @app.put("/api/settings/design-quality")
@@ -534,7 +541,7 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
             ref = brandkit.reference_file().read_text() if brandkit.reference_file().exists() else None
             prev = projects.slides(project_id) if p["versions"] else {}
             if mode == "basic":
-                page = compose.basic_module(m, brand)
+                page = compose.basic_module(m, brand, motion=config.motion(), script_text=p["script"])
                 job.update(progress=0.3, label="Checking every slide, step by step")
                 found = verify.inspect(page, m, config.glossary()["banned"], shots=False)["issues"]
                 projects.save_version(project_id, page, None, note or "Quick layout", issues=found, mode="basic")
@@ -542,6 +549,7 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
                 return
             res = design.design(m, brand, reference=ref, previous=prev, only=only, feedback=feedback, progress=progress,
                                 activity=activity, thought=thought, effort={"design": config.design_effort()},
+                                motion=config.motion(), script_text=p["script"],
                                 timing_note=(moment_note(m) + "\n" + history_note(p, only, feedback)).strip() if feedback else "")
             problems = [i for i in res["issues"] if i.kind != "invented"] + [i for i in res["issues"] if i.kind == "invented"]
             projects.save_version(project_id, res["html"], res["slides"], note, cost=res["cost"], issues=problems)
@@ -623,6 +631,90 @@ def project_module(pid: str, v: int | None = None):
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
     return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/projects/{pid}/download")
+def download_module(pid: str, v: int | None = None):
+    """The module as one HTML file to review or share: it plays with the browser's voice, works offline (fonts embedded) and can be
+    opened again here as an editable project."""
+    p = projects.get(pid)
+    if not p: raise HTTPException(404)
+    page = projects.version_html(pid, v or p["current"])
+    if page is None: raise HTTPException(404, "That version doesn't exist.")
+    name = re.sub(r'[^\w\- ]+', "", p["title"]).strip() or "module"
+    return HTMLResponse(compose.embed_fonts(page), headers={"Content-Disposition": f'attachment; filename="{name}.html"', "Cache-Control": "no-store"})
+
+
+@app.post("/api/projects/import")
+def import_module(file: UploadFile = File(...)):
+    """Open a module file made by the Studio (here or on another computer) as an editable project.
+    (A plain `def`, so it runs in a worker thread: the checker drives a browser.)"""
+    raw = file.file.read()
+    if len(raw) > 60 * 1024 * 1024: raise HTTPException(413, "That file is too large.")
+    try: page = raw.decode("utf-8")
+    except UnicodeDecodeError: raise HTTPException(422, "That doesn't look like a module file.")
+    data = compose.read_project(page)
+    if not data:
+        raise HTTPException(422, "This file wasn't made in the Studio, so it can't be opened for editing here. "
+                                 "You can still turn it into a video: use Create video.")
+    try: m = script.parse(data["script"])
+    except script.ScriptError as e: raise HTTPException(422, f"The script inside this file couldn't be read: {e}")
+    slides = data.get("slides") if isinstance(data.get("slides"), dict) else None
+    p = projects.create(m.title, data["script"])
+    found = verify.inspect(page, m, config.glossary()["banned"], shots=False)["issues"]
+    note = "Imported from a file" + (" (changed outside the Studio)" if data["edited"] else "")
+    projects.save_version(p["id"], page, slides, note, issues=found, mode="design" if slides else "basic")
+    added = {}
+    for word, said in (data.get("pronunciations") or {}).items():         # only words this computer doesn't have yet; nothing is overwritten
+        if isinstance(word, str) and isinstance(said, str) and word not in config.glossary()["pronunciations"]: added[word] = said
+    if added: config.set_glossary({"pronunciations": {**config.glossary()["pronunciations"], **added}})
+    return {"project": p["id"], "title": m.title, "edited": data["edited"], "pronunciations_added": len(added)}
+
+
+narrations = {}                       # id -> {"status", "progress", "files", "times", "error"}
+
+
+@app.post("/api/projects/{pid}/narration")
+def make_narration(pid: str, v: int | None = None):
+    """Voice the module's sentences with the studio voice (cached), so the review player can play exactly what the video will sound like."""
+    p = projects.get(pid)
+    page = projects.version_html(pid, v or p["current"]) if p else None
+    if page is None: raise HTTPException(404, "That module wasn't found.")
+    scenes = cli.load_scenes(page)
+    jid = uuid.uuid4().hex[:10]
+    job = narrations[jid] = {"id": jid, "status": "running", "progress": 0.0, "files": None, "times": None, "error": ""}
+
+    def work():
+        try:
+            voice, speed, pron = "af_heart", 0.90, config.glossary().get("pronunciations", {})
+            cache = cli.CACHE / "tts"
+            cli.synthesize(scenes, voice, speed, cache, progress=lambda f: job.update(progress=round(f, 3)), pronounce=pron, timings=True)
+            job["files"] = [[cache / f"{voice}_{speed}_{__import__('hashlib').sha1(cli.spoken(c, pron).encode()).hexdigest()[:12]}.wav" for c in sc["chunks"]] for sc in scenes]
+            job["times"] = cli.word_times(scenes, voice, speed, cache, pron)
+            job.update(status="done", progress=1.0)
+        except Exception as e:  # noqa: BLE001
+            job.update(status="failed", error=f"The studio voice couldn't be prepared ({type(e).__name__}: {e}).")
+    threading.Thread(target=work, daemon=True).start()
+    return {"id": jid}
+
+
+@app.get("/api/narration/{jid}")
+def narration_status(jid: str):
+    job = narrations.get(jid)
+    if not job: raise HTTPException(404)
+    out = {"status": job["status"], "progress": job["progress"], "error": job["error"]}
+    if job["status"] == "done":
+        out["urls"] = [[f"/api/narration/{jid}/audio/{si}/{ci}" for ci in range(len(row))] for si, row in enumerate(job["files"])]
+        out["times"] = job["times"]
+    return out
+
+
+@app.get("/api/narration/{jid}/audio/{si}/{ci}")
+def narration_audio(jid: str, si: int, ci: int):
+    job = narrations.get(jid)
+    try: path = job["files"][si][ci]
+    except (TypeError, KeyError, IndexError): raise HTTPException(404)
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "max-age=3600"})
 
 
 class ReviseIn(BaseModel):

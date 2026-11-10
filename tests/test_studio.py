@@ -121,3 +121,85 @@ def test_a_design_job_exposes_activity_and_live_thoughts(client):
     j = client.get("/api/write/jobs/j").json()
     assert len(j["activity"]) == 80 and j["phase"] == "write" and j["eta"] == 4 * 12 + 90
     assert [t["label"] for t in j["thoughts"]] == ["slide 3", "slides 1–2"]
+
+
+def _designed_project(client, title_script=None):
+    """A project with a quick-layout version (no AI needed)."""
+    r = client.post("/api/write/generate", json={"script": title_script or script.EXAMPLE, "mode": "basic"}).json()
+    wait(client, r["job"]); return r["project"]
+
+
+def test_motion_setting(client):
+    assert client.get("/api/settings").json()["motion"] == "lively"
+    assert client.put("/api/settings/motion", json={"value": "calm"}).json() == {"motion": "calm"}
+    assert client.put("/api/settings/motion", json={"value": "wild"}).status_code == 400
+    pid = _designed_project(client)
+    assert 'data-motion="calm"' in client.get(f"/api/projects/{pid}/module.html").text
+
+
+def test_download_is_a_single_attachment(client, monkeypatch):
+    pid = _designed_project(client)
+    monkeypatch.setattr(studio.compose, "embed_fonts", lambda page: page + "<!--fonts-->")
+    r = client.get(f"/api/projects/{pid}/download")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"] and ".html" in r.headers["content-disposition"]
+    assert r.text.endswith("<!--fonts-->") and "speechSynthesis" in r.text
+
+
+def test_a_downloaded_module_comes_back_as_an_editable_project(client):
+    pid = _designed_project(client)
+    page = client.get(f"/api/projects/{pid}/module.html").text
+    r = client.post("/api/projects/import", files={"file": ("m.html", page.encode(), "text/html")})
+    assert r.status_code == 200, r.text
+    got = r.json(); assert got["edited"] is False and got["title"] == "Giving Feedback That Lands" and got["project"] != pid
+    view = client.get(f"/api/projects/{got['project']}").json()
+    assert view["script"] == script.EXAMPLE and view["versions"][0]["note"] == "Imported from a file" and view["versions"][0]["mode"] == "basic"
+    assert client.get(f"/api/projects/{got['project']}/module.html").text == page
+
+
+def test_importing_a_changed_file_says_so_and_a_foreign_file_is_refused(client):
+    pid = _designed_project(client)
+    page = client.get(f"/api/projects/{pid}/module.html").text
+    changed = client.post("/api/projects/import", files={"file": ("m.html", page.replace("Welcome", "Hello", 1).encode(), "text/html")}).json()
+    assert changed["edited"] is True
+    assert "changed outside" in client.get(f"/api/projects/{changed['project']}").json()["versions"][0]["note"]
+    foreign = client.post("/api/projects/import", files={"file": ("x.html", b"<html><body>hi</body></html>", "text/html")})
+    assert foreign.status_code == 422 and "Create video" in foreign.json()["detail"]
+
+
+def test_import_adds_only_missing_pronunciations(client):
+    config.set_glossary({"pronunciations": {"R&D": "R and D"}})
+    pid = _designed_project(client)
+    page = client.get(f"/api/projects/{pid}/module.html").text
+    import json as _j, re as _re
+    data = compose_project(page); data["pronunciations"] = {"R&D": "are and dee", "SQL": "sequel"}
+    page = studio.compose.PROJECT_RE.sub(lambda m: m.group(1) + _j.dumps(data) + m.group(3), page)
+    r = client.post("/api/projects/import", files={"file": ("m.html", page.encode(), "text/html")}).json()
+    assert r["pronunciations_added"] == 1
+    assert config.glossary()["pronunciations"] == {"R&D": "R and D", "SQL": "sequel"}               # nothing overwritten
+
+
+def compose_project(page): return studio.compose.read_project(page)
+
+
+def test_studio_voice_for_the_review_player(client, monkeypatch, tmp_path):
+    import numpy as np, soundfile as sf
+    pid = _designed_project(client)
+    monkeypatch.setattr(studio.cli, "CACHE", tmp_path / "cache")
+    def fake_synth(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False):
+        cache.mkdir(parents=True, exist_ok=True)
+        for sc in scenes:
+            for c in sc["chunks"]:
+                sf.write(cache / f"{voice}_{speed}_{__import__('hashlib').sha1(studio.cli.spoken(c, pronounce).encode()).hexdigest()[:12]}.wav", np.zeros(2400, dtype="float32"), 24000)
+        progress(1.0)
+    monkeypatch.setattr(studio.cli, "synthesize", fake_synth)
+    monkeypatch.setattr(studio.cli, "word_times", lambda scenes, voice, speed, cache, pron=None: [[[("hello", 0.1)] for _ in sc["chunks"]] for sc in scenes])
+    job = client.post(f"/api/projects/{pid}/narration").json()
+    end = time.time() + 20
+    while time.time() < end:
+        st = client.get(f"/api/narration/{job['id']}").json()
+        if st["status"] != "running": break
+        time.sleep(0.2)
+    assert st["status"] == "done" and st["times"][0][0] == [["hello", 0.1]]
+    audio = client.get(st["urls"][0][0])
+    assert audio.status_code == 200 and audio.headers["content-type"] == "audio/wav" and len(audio.content) > 2000
+    assert client.get(f"/api/narration/{job['id']}/audio/9/9").status_code == 404

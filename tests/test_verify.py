@@ -75,3 +75,37 @@ def test_gradient_text_is_a_fill_not_a_box():
            "line-height:1.1;letter-spacing:-0.02em;max-width:300px}")
     found = run('<h2 class="g t-heading" data-c="0">How to Interview Candidates <br>at ThoughtSpot</h2>', css)
     assert not any(k in ("overflow", "overlap") for k, _ in found)
+
+
+def test_motion_rules():
+    assert any("your own animations" in x for x in verify.static_issues("s1", "<p>x</p>", "#s1 p{animation:spin 2s infinite}"))
+    assert any("your own animations" in x for x in verify.static_issues("s1", "<p>x</p>", "@keyframes a{to{opacity:1}}"))
+    assert any("same element as data-c" in x for x in verify.static_issues("s1", '<div class="card amb-float" data-c="1">x</div>', ""))
+    assert any("pathLength" in x for x in verify.static_issues("s1", '<svg><path class="draw" d="M0 0L9 9"/></svg>', ""))
+    assert verify.static_issues("s1", '<svg><path class="draw" pathLength="1" d="M0 0L9 9"/></svg><div class="amb-float"><span data-c="1" data-fx="pop">x</span></div>', "#s1 .a{transition:opacity 1s}") == []
+
+
+def test_ambient_loops_do_not_upset_the_measurement():
+    html = ('<h2 class="t-heading" data-c="0" data-fx="left">Heading</h2><div class="row"><div class="card t-lead" data-c="1" data-fx="pop">'
+            '<svg class="amb-float" width="40" height="40" viewBox="0 0 40 40" aria-label="x"><circle class="draw" pathLength="1" cx="20" cy="20" r="16" fill="none" stroke="var(--accent)" stroke-width="3"/></svg>Alpha</div>'
+            '<div class="card t-lead amb-glow-x" data-c="2" data-fx="wipe">Beta</div></div>')
+    assert not any(k in ("overflow", "overlap", "bounds") for k, _ in run(html))
+
+
+def test_the_renderer_anchors_looping_animations_to_absolute_time():
+    from playwright.sync_api import sync_playwright
+    from html2mp4 import cli
+    m = script.parse("Title: T\n## One\nSay: First.\nSay: Second.")
+    page_html = compose.assemble(m, brand(), [("custom", '<h2 class="t-heading" data-c="0">One</h2><div class="amb-float" data-overlay style="width:40px;height:40px;background:var(--accent)"></div>')])
+    import tempfile, pathlib
+    with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
+        f = pathlib.Path(tmp) / "m.html"; f.write_text(page_html)
+        browser, page = cli.open_page(p, f, 1280)
+        page.evaluate(cli.PAGE_JS, ["s1"]); page.evaluate("__html2mp4.reset()")            # reset must cope with endless animations
+        times = []
+        for et in (0.6, 2.0):                                                               # two different 'first seen' moments
+            page.evaluate(f"__html2mp4.show(0,0,{et})"); page.evaluate("__html2mp4.frame(3.0)")
+            times.append(page.evaluate("document.getAnimations().filter(a => a.effect.getComputedTiming().iterations === Infinity).map(a => a.currentTime)"))
+            page.evaluate("__html2mp4.reset()")
+        browser.close()
+    assert times[0] and times[0] == times[1] and all(abs(t - 3000) < 1 for t in times[0])    # the loop sits at t = 3 s however the worker got there

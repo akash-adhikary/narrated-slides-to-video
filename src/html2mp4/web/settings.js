@@ -233,5 +233,17 @@ document.querySelectorAll("#dqSeg button").forEach(b => b.addEventListener("clic
   try{ await api("/api/settings/design-quality", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: b.dataset.v})}); }
   catch(err){ toast(err.message); }
 }));
+/* ---------- motion ---------- */
+const MV_NOTES = {lively: "Recommended. Entrances, drawn icons and arrows, count-ups, soft glows and gently moving backgrounds, so it feels like a video and not a slide deck.",
+                  calm: "Entrances and slide changes only. Nothing loops or glows."};
+function showMotion(v){
+  document.querySelectorAll("#mvSeg button").forEach(b => b.setAttribute("aria-checked", b.dataset.v === v));
+  $("#mvNote").textContent = MV_NOTES[v];
+}
+document.querySelectorAll("#mvSeg button").forEach(b => b.addEventListener("click", async () => {
+  showMotion(b.dataset.v);
+  try{ await api("/api/settings/motion", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: b.dataset.v})}); toast("Applies to slides you design from now on"); }
+  catch(err){ toast(err.message); }
+}));
 const loadWithGloss = pageHooks.settings;
-pageHooks.settings = async () => { await loadWithGloss(); showQuality((await api("/api/settings")).design_quality); };
+pageHooks.settings = async () => { await loadWithGloss(); const s = await api("/api/settings"); showQuality(s.design_quality); showMotion(s.motion || "lively"); };

@@ -280,7 +280,7 @@
 .logo-box{height:48px;min-width:120px;padding:0 14px;border:1px dashed var(--line);border-radius:12px;display:grid;place-items:center;font-size:13px;color:var(--faint);background:var(--surface-2)}
 .logo-box img{height:28px;width:auto;max-width:180px;display:block}
 .brand-preview{position:sticky;top:84px;display:flex;flex-direction:column;gap:8px}
-.brand-preview iframe{width:100%;aspect-ratio:1280/784;border:1px solid var(--line);border-radius:14px;background:#000;box-shadow:var(--shadow-lg)}
+.brand-preview iframe{width:100%;aspect-ratio:1280/790;border:1px solid var(--line);border-radius:14px;background:#000;box-shadow:var(--shadow-lg)}
 .brand-preview small{font-size:12.5px;color:var(--muted)}
 @media (max-width:860px){ .brand-grid{grid-template-columns:1fr} .brand-preview{position:static} .tabs{margin-left:8px} .tabs a{padding:6px 10px} }
 @media (max-width:560px){ .top-link{display:none} }
@@ -364,7 +364,7 @@
 .diff del{color:var(--muted);text-decoration-color:var(--err)} .diff ins{text-decoration:none;background:var(--ok-soft);color:var(--ink);border-radius:6px;padding:1px 6px;width:fit-content}
 .sugg-act{display:flex;gap:8px}
 .rv-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:22px;align-items:start}
-.rv-stage iframe{width:100%;aspect-ratio:1280/784;border:1px solid var(--line);border-radius:14px;background:#000;box-shadow:var(--shadow-lg);display:block}
+.rv-stage iframe{width:100%;aspect-ratio:1280/790;border:1px solid var(--line);border-radius:14px;background:#000;box-shadow:var(--shadow-lg);display:block}
 .rv-bar{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .rv-bar select{height:36px;border:1px solid var(--line);border-radius:10px;padding:0 10px;background:var(--surface-2);font:13px var(--font);color:var(--ink);max-width:100%}
 .rv-bar small{font-size:12.5px;color:var(--muted);flex:1;min-width:160px}
@@ -425,3 +425,8 @@
 .activity li.write::before{background:var(--accent)} .activity li.check::before{background:#0ea5e9} .activity li.fix::before{background:#d97706}
 .activity li.review::before{background:#a855f7} .activity li.done::before{background:var(--ok)}
 @media (prefers-reduced-motion:reduce){ .pulse{animation:none} }
+
+.rv-hint{display:block;margin-top:10px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.rv-bar a.link{cursor:pointer}
+.rv-stage iframe:fullscreen{border:0;border-radius:0}
+.rv-bar select#rvVersion{flex:1 1 100%}

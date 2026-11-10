@@ -178,12 +178,33 @@ def test_activity_and_live_thinking_are_reported(monkeypatch):
     assert fractions == sorted(fractions) and fractions[-1] == 1.0                                          # progress never goes backwards
 
 
-def test_the_worked_example_in_the_prompt_passes_every_check():
-    m = script.parse("Title: T\n## Why feedback matters\nShow: Builds trust · Speeds up growth · Prevents surprises\n" + "\n".join("Say: " + t for t in design.EXAMPLE_NARRATION))
-    page = compose.assemble(m, brand(), [("example", design.EXAMPLE_HTML)], design.EXAMPLE_CSS)
+def test_the_worked_examples_in_the_prompt_pass_every_check():
+    m = script.parse("Title: T\n## Why feedback matters\nShow: Builds trust · Speeds up growth · Prevents surprises\n" + "\n".join("Say: " + t for t in design.EXAMPLE_NARRATION)
+                     + "\n## A clear picture\nShow: Define · Interview · Decide\n" + "\n".join("Say: " + t for t in design.EXAMPLE2_NARRATION))
+    css2 = design.EXAMPLE2_CSS.replace("#s1", "#s2")
+    page = compose.assemble(m, brand(), [("example", design.EXAMPLE_HTML), ("example", design.EXAMPLE2_HTML)], design.EXAMPLE_CSS + "\n" + css2)
     r = verify.inspect(page, m, shots=False)
     assert [i for i in r["issues"] if i.severity == "error"] == [] and compose.check(page, m) == []
-    assert verify.static_issues("s1", design.EXAMPLE_HTML, design.EXAMPLE_CSS) == []
+    assert verify.static_issues("s1", design.EXAMPLE_HTML, design.EXAMPLE_CSS) == [] and verify.static_issues("s2", design.EXAMPLE2_HTML, css2) == []
+
+
+def test_prompt_teaches_the_motion_kit_and_layout_variety():
+    lively, calm = design.system_for("lively"), design.system_for("calm")
+    for phrase in ("data-fx", "pathLength", "amb-float", "flow", "count", "Layout variety", "Hub and spoke", "never the same layout on two slides in a row"):
+        assert phrase in lively
+    assert "amb-float" not in design.system_for("calm").split("# Layout variety")[0].split("# Motion")[1] or "Do not use the amb-* loops" in calm
+    assert "Do not use the amb-* loops" in calm and "Do not use the amb-* loops" not in lively
+    assert "connector lines" not in lively and "your own animations" in lively
+
+
+def test_the_designer_gets_the_motion_style_and_embeds_the_script(monkeypatch):
+    fake = FakeClaude({"s1": GOOD_ONE, "s2": GOOD_TWO})
+    monkeypatch.setattr(ai, "structured", fake)
+    r = design.design(script.parse(SCRIPT), brand(), motion="calm", script_text=SCRIPT)
+    assert "Do not use the amb-* loops" in system_text(fake.of("design")[0])
+    assert 'data-motion="calm"' in r["html"]
+    project = compose.read_project(r["html"])
+    assert project["script"] == SCRIPT and set(project["slides"]) == {"s1", "s2"} and project["edited"] is False
 
 
 def test_module_wide_review_problems_reach_every_slide():

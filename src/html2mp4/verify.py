@@ -149,10 +149,13 @@ def static_issues(slide_id, inner_html, css, banned=()):
         (r"<\s*script", "scripts aren't allowed"), (r"<\s*(iframe|object|embed|link|meta|base|form|img|video|audio)\b", "that element isn't allowed (draw with HTML and SVG)"),
         (r"\son\w+\s*=", "event handlers aren't allowed"), (r"(?:href|src|xlink:href)\s*=\s*[\"']?\s*(?:https?:)?//", "outside links aren't allowed"),
         (r"url\s*\(", "url() isn't allowed (use gradients and SVG shapes)"), (r"@import|@font-face", "@import and @font-face aren't allowed"),
-        (r"@keyframes|\banimation\s*:|animation-name", "animations aren't allowed (reveals use data-c and CSS transitions)"),
+        (r"@keyframes|\banimation(?:-[a-z-]+)?\s*:", "your own animations aren't allowed: use data-fx, draw, count and the amb-* classes"),
+        (r"<[^>]*\bdata-c\b[^>]*class\s*=\s*[\"'][^\"']*\bamb-|<[^>]*class\s*=\s*[\"'][^\"']*\bamb-[^>]*\bdata-c\b", "an amb-* loop can't be on the same element as data-c; put it on an inner element"),
         (r"position\s*:\s*fixed", "position:fixed isn't allowed"), (r"javascript:", "javascript: links aren't allowed"),
     ]:
         if re.search(pattern, inner_html + "\n" + css, re.I): problems.append(f"{slide_id}: {why}.")
+    for tag in re.findall(r"<[^>]*\bclass\s*=\s*[\"'][^\"']*\bdraw\b[^>]*>", inner_html):
+        if not re.search(r'pathLength\s*=\s*["\']1["\']', tag): problems.append(f"{slide_id}: an element with class draw needs pathLength=\"1\".")
     for rule in re.findall(r"([^{}]+)\{", css):
         if rule.strip().startswith("@"): continue
         for sel in rule.split(","):
@@ -177,6 +180,7 @@ def inspect(page_html, module, banned=(), allowed_extra=(), shots=True):
         with sync_playwright() as p:
             browser, page = cli.open_page(p, path, 1280)
             page.on("pageerror", lambda e: js_errors.append(str(e)))
+            page.add_style_tag(content="*,*::before,*::after{animation:none!important}.slide,.slide-body{transform:none!important}")   # measure the settled layout, not a moment of an ambient loop
             page.evaluate(cli.PAGE_JS, ids)
             page.evaluate("__html2mp4.reset()")
             for si, sid in enumerate(ids):

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Motion and graphics.** Slides are no longer just cards. Claude now has a tested motion kit (entrances such as pop, slide, blur and
+  wipe; icons, arrows and diagram lines that draw themselves in; count-up numbers; highlight sweeps and glows; arrows that appear
+  between steps; gently floating illustrations and drifting light) and a catalogue of layouts to choose from (big statement with an
+  illustration, flow, timeline, cycle, hub and spoke, this versus that, stat callout, quote, checklist, levels, spotlight). The design
+  review flags plain boxes when the content suggests a diagram. **Settings > Motion**: Lively (default) or Calm.
+- **A bigger, narrated player.** Play reads the script with your browser's own voice, with a speed control, a voice picker, captions, a
+  clickable progress bar and full screen (F). Things appear on the words that name them. **Studio voice** plays the same voice the
+  video will use. **Open large** opens the player in its own tab.
+- **Download HTML** gives one file that works offline in any browser and carries its own script and slide designs.
+  **Open a module file (.html)** on the Write page brings such a file back as an editable project (a file changed outside the Studio is
+  flagged). Pronunciations in the file are added to your list if you don't have them yet.
+
+### Fixed
+- The video renderer now handles looping animations: they run on absolute time, so every parallel render worker agrees on where
+  they are and a 1-worker and a 4-worker render match.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

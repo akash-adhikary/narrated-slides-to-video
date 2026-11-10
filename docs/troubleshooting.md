@@ -58,6 +58,22 @@ That's a note, not an error: labels are often shortened or reworded. Check it sa
 **The preview looks different from my brand.**
 Check **Settings › Brand kit**, then ask for the whole module to be redesigned with a note about what's off.
 
+### The player
+
+**There's no sound, or no voice list.** Play uses your browser's own voices. Chrome, Edge and Safari have them; some Linux
+setups don't. Without a voice the player still runs, paced silently. Make sure the tab isn't muted.
+
+**The voice sounds different from the video.** It is meant to: Play is a preview with your browser's voice. **Studio voice** (in the
+Studio) plays the voice the video uses.
+
+**Studio voice isn't there.** It only appears when the module is open inside the Studio, because the Studio makes the voice. In a
+downloaded file the browser voice is used.
+
+**Full screen doesn't work inside the page.** Use **Open large**, or press F in the larger tab.
+
+**I opened a file and it says it can't be edited.** Only modules made by the Studio carry their script and slide designs. Any
+module file can still be turned into a video on the Create video page.
+
 ## Making videos
 
 **"This file doesn't contain a narration script."**

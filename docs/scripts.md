@@ -93,6 +93,22 @@ The progress card shows the stage (Plan, Write, Check, Fix, Review) and three li
 **Design quality** in Settings chooses how much care Claude takes. *Balanced* (the default) takes 2 to 4 minutes for six slides
 and costs about $0.60. *Thorough* takes 4 to 5 minutes and about $0.90, and tends to add more illustration and detail.
 
+### Motion and layouts
+
+Slides are designed to move like a video, not a slide deck. Claude draws on a fixed motion kit, so what you see in the review
+player is what the video shows:
+
+- **Entrances**: things rise, pop, slide in from a side, zoom, blur in or wipe across, on the word that names them.
+- **Drawing**: icons, outlines, underlines, diagram lines and arrows trace themselves in. Numbers can count up.
+- **Emphasis and flow**: a highlight sweeps under a key phrase, a card glows as it appears, and arrows appear between steps.
+- **Ambient motion**: illustrations float gently, a ring or badge breathes, dashes travel along a path to show direction, and a soft
+  light drifts behind every slide.
+
+Claude also chooses from a catalogue of layouts (big statement with an illustration, flow, timeline, cycle, hub and spoke, this
+versus that, stat callout, quote, checklist, levels, spotlight, cards) and varies them across the module. If you'd like a plainer
+look, set **Settings > Motion** to *Calm*: entrances and slide changes only, nothing that loops. You can still ask for more or less
+in the feedback box, for example "make slide 3 a flow instead of cards".
+
 ### The checker
 
 Before you see anything, every narration step of every slide is rendered in a browser and measured. Anything that fails
@@ -136,6 +152,30 @@ earlier version from the list to look at it, and **Restore this version** to go 
 exactly as they were.
 
 When you're happy, **Use these slides to make the video** moves the module to the Create video page.
+
+## The player
+
+The review player is part of the module file itself, so it behaves the same in the Studio and in a file you share.
+
+- **Play** narrates with your browser's own text-to-speech voice, one sentence at a time. Choose the voice and speed (0.75× to 1.5×).
+  Things appear on the words that name them. This is a *preview*: the video uses the studio voice, so timing differs slightly.
+- **Studio voice** (in the Studio only) plays the same voice the video will use, with its real word timings. The first time takes
+  a little while to prepare; after that it's instant.
+- **Full screen** (⤢, or press F; Esc to leave) hides the controls when you stop moving the mouse. **Open large** opens the player in
+  its own browser tab. **CC** shows captions. Space plays and pauses, the arrow keys step, and you can click the progress bar to jump.
+
+## Sharing a module
+
+**Download HTML** saves the current version as one file that works offline in any browser: the fonts are embedded (the one network
+request is to fetch Google Fonts the first time, if your style uses them). Send it to a colleague to review. They press Play and
+hear the narration.
+
+Two ways to use a file that comes back:
+
+- **Open a module file (.html)** on the Write page brings it back as an editable project, with its script and slide designs, so you
+  can keep refining it with Claude. If the file was changed by hand outside the Studio, you're told: later redesigns start from the
+  Studio's own version of the slides, not your hand edits.
+- **Create video** converts any module file exactly as it is, hand edits included.
 
 ## Your brand
 

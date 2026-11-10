@@ -39,6 +39,13 @@ script ─► parse ─► design (Claude) ─► compose ─► check ─► fi
    finished-slide screenshots flags weak hierarchy, uneven spacing, inconsistent conventions and brand-rule violations; a
    problem about the whole module is fixed on every slide. Clear defects get one more fix. Whatever remains is shown to you as notes.
 
+**Motion.** The motion kit lives in [`compose.py`](../src/html2mp4/compose.py) as plain CSS: entrances, drawing (`stroke-dashoffset`
+transitions on paths with `pathLength="1"`), count-ups (a registered `--n` custom property that transitions), flow arrows and the
+ambient loops. Claude uses them through `data-fx`, `draw`, `count`, `flow`, `hl`, `glow-in` and `amb-*` classes and may not write its
+own animations, so everything is tested and reproducible. The renderer seeks every transition and animation to the exact frame time:
+a transition starts when it is first seen, and a looping animation runs on absolute time, so parallel render workers stay in step. The
+checker measures the settled layout with ambient loops switched off.
+
 **Visibility.** Every call streams Claude's thinking summary and, for designs, the plan for each slide as it starts, and the
 Studio shows both live along with every checker finding. Nothing is estimated while Claude plans; the time left is computed
 from the stage the design is in.

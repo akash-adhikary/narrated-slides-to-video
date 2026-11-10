@@ -18,7 +18,7 @@ MAX_PARALLEL = 4                 # simultaneous Claude calls when slides are des
 # checked again), so they use less effort than a first design.
 EFFORT = {"design": "high", "fix": "low", "review_fix": "medium", "critique": "medium"}
 
-SYSTEM = """You are a senior presentation designer making slides for narrated training videos. Each slide is 1280x720 and is
+SYSTEM_RULES = """You are a senior presentation designer making slides for narrated training videos. Each slide is 1280x720 and is
 shown while a narrator reads the script; elements appear on screen as the narrator says the matching words.
 
 # What you return
@@ -43,9 +43,9 @@ Use plain HTML and inline SVG only.
 - Everything must stay inside the 1120x560 body area, clear of the footer.
 - A slide should hold one idea. Prefer 2 to 6 clear blocks. Leave generous whitespace; fill the area sensibly (don't
   leave a large empty band, and don't cram).
-- Prefer cards, numbered steps, side-by-side comparisons, simple columns and big statements. Do NOT use connector
-  lines, arrows between boxes, hubs-and-spokes or decorative rules: viewers dislike them. If a line is truly needed it
-  must be straight, evenly spaced and aligned to the grid.
+- Pick the layout that suits what the slide says (see "Layout variety" below). Arrows between steps come from the
+  `flow` class; diagrams (hub and spoke, cycles, timelines) are drawn inside one SVG. Never place loose lines, arrows or
+  decorative rules with absolute positions or on top of other boxes.
 - Keep one visual language across all slides in the module: the same heading position and size, the same card style
   (radius, padding, border), the same spacing. Vary the layout only where the content differs.
 - Text conventions are shared by every slide: apply the brand's capitalisation rules (for example Title Case headings,
@@ -77,8 +77,8 @@ Style text with the t-* classes. Text must sit fully inside its shape. Give each
 - Do not draw the brand logo or footer; they are added automatically.
 
 # Technical limits
-No scripts, event handlers, external links or fonts, images, `url()`, `@import`, animations or `@keyframes`, and no
-`position:fixed`. Every CSS selector must start with the slide's id (e.g. `#s2 .card{...}`).
+No scripts, event handlers, external links or fonts, images, `url()`, `@import`, your own animations or `@keyframes` (use the
+motion kit), and no `position:fixed`. Every CSS selector must start with the slide's id (e.g. `#s2 .card{...}`).
 
 Return one entry per requested slide, using the ids you were given, and a one-line `summary` of its layout."""
 
@@ -93,20 +93,90 @@ EXAMPLE_HTML = """<h2 class="t-heading" data-c="0">Why feedback matters</h2>
 EXAMPLE_CSS = """#s1 .fb-cards{grid-template-columns:repeat(3,1fr);margin-top:40px}
 #s1 .fb-card{display:flex;flex-direction:column;justify-content:space-between;gap:48px;min-height:240px;padding:32px}"""
 
-SYSTEM += """
+MOTION_LIVELY = """
 
-# A complete example (a slide like this passes every check)
-Script for slide s1, with the on-screen text "Builds trust · Speeds up growth · Prevents surprises". Narration steps:
-""" + "\n".join(f"  {i}: {t}" for i, t in enumerate(EXAMPLE_NARRATION)) + """
-A good answer for it (html and css; the heading carries data-c="0", and each card appears on the words that name it):
-<html>
-""" + EXAMPLE_HTML + """
-</html>
-<css>
-""" + EXAMPLE_CSS + """
-</css>
-Note how: boxes have generous padding and room for their text; type comes only from t-* classes; colours only from variables;
-cards share the width with a grid; there are no connector lines; and everything fits well inside the 1120x560 area."""
+# Motion and graphics
+This is a narrated video, not a slide deck: it should feel alive. Use the motion kit. It is tested, and the video reproduces it
+frame for frame. You cannot write your own animations.
+- Entrances: put `data-fx` on an element that has `data-c`. `rise` (the default), `pop` (cards, badges, icons), `left` / `right`
+  (things that arrive from a side, such as headings), `zoom`, `blur` (a big statement), `wipe` (a left-to-right reveal for a
+  banner, bar or quote). Choose with purpose; items in one set share an effect.
+- Drawing: an SVG path, line, circle or rect with class `draw` and `pathLength="1"` traces itself in when its element
+  appears. Use it for icons, outlines, underlines, diagram lines, arrows and curves (fill="none", stroke from a colour
+  variable, stroke-linecap round).
+- Count-up: `<span class="count t-title" style="--to:40"></span>` counts from 0 to 40 as its element appears. Only for numbers
+  that are in the script; put any suffix such as % in normal text right after it.
+- Emphasis: class `hl` on a key phrase draws a highlight sweep under it; class `glow-in` on a card gives it a soft glow as it appears.
+- Flow: `<div class="flow">` holding 2 to 4 children, each with data-c, draws an arrow between the steps as each one appears
+  (`flow down` stacks them). Don't add your own arrows between flow steps.
+- Ambient loops, on an INNER element (never on the element that has data-c): `amb-float` (an illustration rises and falls),
+  `amb-pulse` (a key icon or badge breathes), `amb-glow` (a soft glow pulses around a focal shape), `amb-flow` (dashes travel along
+  a dashed path, to show direction in a diagram), `amb-spin` (a slow ring or gear), `amb-drift` (a big soft decorative shape).
+  Use one or two per slide. A soft light already drifts behind every slide.
+- Diagrams (hub and spoke, cycle, timeline, journey, before/after) are drawn in ONE svg with an explicit viewBox, so positions are
+  exact. Lines and arrows joining nodes are welcome there when they meet the nodes exactly: draw them with `draw`, and put
+  data-c on the `<g>` that holds each node together with its line, so they appear together.
+- Animation must never cover or crowd text. When a step has finished appearing, everything sits settled inside the area."""
+
+MOTION_CALM = """
+
+# Motion
+Keep motion calm: entrances only. Use `data-fx` (rise, pop, left, right, zoom, blur, wipe), `draw` (with pathLength="1"), the
+`flow` class, `hl` and `count`. Do not use the amb-* loops or glow-in."""
+
+LAYOUTS = """
+
+# Layout variety
+Choose the layout that fits what each slide says, and vary them: never the same layout on two slides in a row, and use plain
+card grids on at most half the slides. A slide of text in plain boxes is the lowest-effort answer; avoid it unless the content is
+truly a plain list. Layouts to choose from:
+1. Big statement: one large idea (t-title or t-display) beside a hero illustration drawn in SVG.
+2. Process or flow: 2 to 4 steps joined by `flow` arrows.
+3. Timeline or journey: a line drawn across (SVG with `draw`) with 3 to 5 markers that pop in as they are mentioned.
+4. Cycle: 3 to 5 nodes on a ring joined by arcs (SVG), when the idea repeats.
+5. Hub and spoke: a central idea with 3 to 6 things around it, in one SVG.
+6. This versus that: two panels (one muted, one accent) with a divider that draws in.
+7. Stat callout: a very large count-up number with a caption and supporting points.
+8. Quote: a large quotation with a wipe reveal and its attribution.
+9. Checklist: items whose check marks draw in one by one.
+10. Levels or comparison: bars or steps of different heights that rise.
+11. Cards (2 to 6 parallel items) with an icon that draws in. Not plain boxes.
+12. Spotlight: a key phrase in a large sentence, picked out with `hl`.
+Every module needs at least one slide with a real diagram or hero illustration."""
+
+EXAMPLE2_NARRATION = ["Every great hire starts with a clear picture of the role.",
+                      "First we define it, then we interview for it, and finally we decide together."]
+EXAMPLE2_HTML = """<h2 class="t-heading" data-c="0" data-fx="left">A clear picture of the role</h2>
+<div class="flow ex-flow">
+  <div class="card ex-step glow-in" data-c="1" data-cue="define it" data-fx="pop"><svg class="amb-float" width="64" height="64" viewBox="0 0 64 64" aria-label="Define"><circle class="draw" pathLength="1" cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="3"/><path class="draw" pathLength="1" d="M20 32h24M32 20v24" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/></svg><div><div class="t-small t-muted">01</div><div class="t-lead">Define it</div></div></div>
+  <div class="card ex-step glow-in" data-c="1" data-cue="interview for it" data-fx="pop"><svg class="amb-float" width="64" height="64" viewBox="0 0 64 64" aria-label="Interview"><circle class="draw" pathLength="1" cx="24" cy="24" r="10" fill="none" stroke="var(--accent)" stroke-width="3"/><path class="draw" pathLength="1" d="M8 52c0-9 7-15 16-15s16 6 16 15M44 20h12M44 30h8" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/></svg><div><div class="t-small t-muted">02</div><div class="t-lead">Interview for it</div></div></div>
+  <div class="card ex-step glow-in" data-c="1" data-cue="decide together" data-fx="pop"><svg class="amb-float" width="64" height="64" viewBox="0 0 64 64" aria-label="Decide"><circle class="draw" pathLength="1" cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" stroke-width="3"/><path class="draw" pathLength="1" d="M20 33l8 8 17-18" fill="none" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><div><div class="t-small t-muted">03</div><div class="t-lead">Decide together</div></div></div>
+</div>"""
+EXAMPLE2_CSS = """#s1 .ex-flow{margin-top:72px}
+#s1 .ex-step{display:flex;flex-direction:column;justify-content:space-between;gap:48px;min-height:330px;padding:36px}"""
+
+
+def _example(n, narration, show, html, css, note):
+    return (f"\nExample {n}: slide s1 with the on-screen text \"{show}\". Narration steps:\n"
+            + "\n".join(f"  {i}: {t}" for i, t in enumerate(narration)) + f"\n<html>\n{html}\n</html>\n<css>\n{css}\n</css>\n{note}\n")
+
+
+EXAMPLES = ("""
+
+# Complete examples (slides like these pass every check)
+Each heading carries data-c="0"; each item appears on the words that name it.
+""" + _example(1, EXAMPLE_NARRATION, "Builds trust · Speeds up growth · Prevents surprises", EXAMPLE_HTML, EXAMPLE_CSS,
+               "Note: generous padding, type only from t-* classes, colours only from variables, a grid that shares the width, everything inside the area.")
+            + _example(2, EXAMPLE2_NARRATION, "Define · Interview · Decide", EXAMPLE2_HTML, EXAMPLE2_CSS,
+                       "Note: a `flow` of three steps with arrows that draw between them, icons that trace themselves in, pop entrances on the words "
+                       "that name each step, a gentle float on the icons (on the inner svg, not on the data-c card), and pathLength=\"1\" on every draw."))
+
+
+def system_for(motion="lively"):
+    """The designer's system prompt: the rules, the motion kit for the chosen motion style, the layout catalogue and worked examples."""
+    return SYSTEM_RULES + (MOTION_CALM if motion == "calm" else MOTION_LIVELY) + LAYOUTS + EXAMPLES
+
+SYSTEM = system_for('lively')
 
 SLIDE_SCHEMA = {"type": "object", "properties": {
     "id": {"type": "string"}, "layout": {"type": "string"}, "summary": {"type": "string"},
@@ -126,9 +196,10 @@ moment everything has appeared) and the brand rules they must follow. Report onl
 weak hierarchy, awkward or uneven spacing, large empty areas, crowded blocks, misaligned items, lines or decoration that
 look bad, text that is hard to read, a layout that doesn't suit its content, a slide that looks different in style from the
 others, or a brand-rule violation. Mark `must` only for clear defects; everything else is `nice`. For each problem give a
-concrete `fix`. If the slides look good, return no problems.
+concrete `fix`. Also flag, as `nice`, a slide whose content suggests a diagram, flow, timeline or illustration but that is just text in
+plain boxes, and a module where most slides use the same card grid. If the slides look good, return no problems.
 
-Ignore the footer strip (logo, progress dots): it is added automatically and already follows the brand rules. Screenshots
+Slides are animated in the video, but you only see each one's final state: don't judge motion. Ignore the footer strip (logo, progress dots): it is added automatically and already follows the brand rules. Screenshots
 are shrunk, so don't judge small sizes from them; the type sizes and contrast are checked separately by measurement."""
 
 
@@ -277,10 +348,11 @@ def _span(ids):
 
 
 def design(module, brand, *, glossary=None, reference=None, previous=None, only=None, feedback="", progress=None, polish=True,
-           timing_note="", activity=None, thought=None, effort=None):
+           timing_note="", activity=None, thought=None, effort=None, motion=None, script_text=None):
     """Design (or revise) slides. Returns {"html", "slides", "issues", "cost", "calls", "log"}."""
     glossary = glossary or config.glossary()
     efforts = {**EFFORT, **(effort or {})}
+    motion = motion or config.motion()
     ids = slide_ids(module)
     only = [i for i in (only or ids) if i in ids]
     slides = {k: dict(v) for k, v in (previous or {}).items() if k in ids}
@@ -290,7 +362,7 @@ def design(module, brand, *, glossary=None, reference=None, previous=None, only=
     banned = glossary.get("banned", [])
     # The brand, its rules and the reference module are the same on every call, so they sit in the cached system prompt
     # (cheaper and faster for every call after the first).
-    system = [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+    system = [{"type": "text", "text": system_for(motion), "cache_control": {"type": "ephemeral", "ttl": "1h"}},
               {"type": "text", "text": f"Brand:\n{brand_text}\n"
                + (f"\nA module previously designed for this brand. Match its visual language (colour use, type, shapes, spacing), not its content:\n<reference>\n{ref}\n</reference>\n" if ref else ""),
                "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
@@ -340,7 +412,7 @@ def design(module, brand, *, glossary=None, reference=None, previous=None, only=
     while True:
         run.say(0.45 + 0.02 * n, "Checking every slide, step by step"); n += 1
         run.event("check", "Rendering every step of every slide to check fit, overlap, type sizes and contrast.")
-        page, issues, shots = _check(module, brand, slides, banned)
+        page, issues, shots = _check(module, brand, slides, banned, motion, script_text, glossary)
         errors = [i for i in issues if i.severity == "error"]
         if not errors: run.event("check", "The checker found nothing to fix.")
         else:
@@ -416,7 +488,7 @@ def _merge(slides, data, wanted):
         if sid in got: slides[sid] = _clean(got[sid])
 
 
-def _check(module, brand, slides, banned):
+def _check(module, brand, slides, banned, motion="lively", script_text=None, glossary=None):
     """Assemble the module and inspect it. Returns (html, issues, screenshots)."""
     ids = slide_ids(module)
     issues = []
@@ -425,7 +497,10 @@ def _check(module, brand, slides, banned):
         for msg in verify.static_issues(sid, slides[sid]["html"], slides[sid]["css"], banned):
             issues.append(verify.Issue(sid, 0, "rule", "error", msg))
     if any(i.kind == "missing" for i in issues): return "", issues, {}
-    page = compose.assemble(module, brand, [(slides[s]["layout"], slides[s]["html"]) for s in ids], "\n".join(slides[s]["css"] for s in ids))
+    project = None if script_text is None else {"script": script_text, "brand": brand.get("kit_name", ""), "slides": slides,
+                                                "pronunciations": (glossary or {}).get("pronunciations", {})}
+    page = compose.assemble(module, brand, [(slides[s]["layout"], slides[s]["html"]) for s in ids], "\n".join(slides[s]["css"] for s in ids),
+                            motion=motion, project=project)
     for sid, msg in compose.check_detailed(page, module): issues.append(verify.Issue(sid, 0, "narration", "error", msg))
     r = verify.inspect(page, module, banned)
     return page, issues + r["issues"], r["shots"]

@@ -35,6 +35,7 @@
     <div class="script-tools">
       <button class="link" type="button" id="wExample">Insert an example</button>
       <label class="link" for="wFile">Open a text file</label><input type="file" id="wFile" accept=".txt,.md,text/plain" hidden>
+      <label class="link" for="wImport" title="A module file you or a colleague downloaded from the Studio">Open a module file (.html)</label><input type="file" id="wImport" accept=".html,.htm,text/html" hidden>
       <button class="link" type="button" id="wHelp">How to write it</button>
       <button class="link" type="button" id="wNew" hidden>Start a new module</button>
     </div>
@@ -88,9 +89,11 @@ Note: three cards, left to right</pre>
     <div class="card-h"><span class="num">2</span><h2 id="hReview">Review your slides</h2><p id="rvMeta"></p></div>
     <div class="rv-grid">
       <div class="rv-stage">
-        <iframe id="rvFrame" title="Slide preview" src="about:blank"></iframe>
+        <iframe id="rvFrame" title="Slide preview" src="about:blank" allow="fullscreen; autoplay" allowfullscreen></iframe>
         <div class="rv-bar"><select id="rvVersion" aria-label="Version"></select><button class="link" type="button" id="rvRestore" hidden>Restore this version</button>
-          <small>Use ‹ › or the slide list to step through. The video follows exactly this.</small></div>
+          <a class="link" id="rvOpen" target="_blank" rel="noopener" title="Open the player in its own tab">Open large</a>
+          <a class="link" id="rvDownload" title="One HTML file to review or share. It plays with your browser's voice and can be opened again here.">Download HTML</a></div>
+        <small class="rv-hint">Press Play to hear it with your browser's voice, or <b>Studio voice</b> for the voice the video will use. ⤢ goes full screen. The video follows exactly this.</small>
       </div>
       <aside class="rv-side"><h4>Slides</h4><ol id="rvSlides"></ol></aside>
     </div>
@@ -259,6 +262,15 @@ Note: three cards, left to right</pre>
       <button type="button" role="radio" data-v="thorough" aria-checked="false">Thorough</button>
     </div>
     <p class="fine" id="dqNote"></p>
+  </section>
+
+  <section class="card" aria-labelledby="hMotion">
+    <div class="card-h"><h2 id="hMotion">Motion</h2><p>How much the slides move</p></div>
+    <div class="seg" id="mvSeg" role="radiogroup" aria-label="Motion">
+      <button type="button" role="radio" data-v="lively" aria-checked="true">Lively</button>
+      <button type="button" role="radio" data-v="calm" aria-checked="false">Calm</button>
+    </div>
+    <p class="fine" id="mvNote"></p>
   </section>
 
   <section class="card" aria-labelledby="hGloss">

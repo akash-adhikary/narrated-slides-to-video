@@ -41,6 +41,16 @@ $("#wFile").addEventListener("change", e => {
   const f = e.target.files[0]; if(!f) return;
   const r = new FileReader(); r.onload = () => { box.value = r.result; draft.set(box.value); parseNow(); }; r.readAsText(f); e.target.value = "";
 });
+$("#wImport").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if(!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    const r = await api("/api/projects/import", {method: "POST", body: fd});
+    await openProject(r.project); loadModules(); $("#cardReview").scrollIntoView({behavior: "smooth"});
+    toast(r.edited ? "Opened. This file was changed outside the Studio, so later redesigns start from the Studio's own version of the slides."
+      : r.pronunciations_added ? `Opened, and added ${r.pronunciations_added} pronunciation${r.pronunciations_added > 1 ? "s" : ""} from the file.` : "Opened. You can keep refining it here.");
+  }catch(err){ toast(err.message); }
+});
 $("#wHelp").addEventListener("click", () => { $("#wHelpBox").hidden = !$("#wHelpBox").hidden; });
 $("#wNew").addEventListener("click", () => {
   W.project = null; W.saved = ""; box.value = ""; draft.set(""); W.outline = null;
@@ -170,13 +180,19 @@ async function openProject(pid, version){
 function showFrame(){
   const f = $("#rvFrame");
   f.onload = () => { const r = W.rows && W.rows[0]; if(r) f.contentWindow.postMessage({html2mp4: "go", pos: r.last}, "*"); };
-  f.src = `/api/projects/${W.project}/module.html?v=${W.version}&t=${Date.now()}`;
+  f.src = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}&t=${Date.now()}`;
+  $("#rvOpen").href = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}`;
+  $("#rvDownload").href = `/api/projects/${W.project}/download?v=${W.version}`;
 }
 $("#rvSlides").addEventListener("click", e => {
   const b = e.target.closest("button"); if(!b) return;
   $("#rvFrame").contentWindow.postMessage({html2mp4: "go", pos: W.rows[+b.dataset.i].last}, "*");
 });
 addEventListener("message", e => {
+  if(e.source === $("#rvFrame").contentWindow && e.data && e.data.html2mp4 === "fullscreen"){
+    const f = $("#rvFrame"); if(document.fullscreenElement) document.exitFullscreen(); else if(f.requestFullscreen) f.requestFullscreen().catch(() => window.open($("#rvOpen").href, "_blank"));
+    return;
+  }
   if(e.source !== $("#rvFrame").contentWindow || !e.data || e.data.html2mp4 !== "step" || !W.rows) return;
   const i = W.rows.findIndex(r => e.data.pos >= r.first && e.data.pos <= r.last);
   document.querySelectorAll("#rvSlides button").forEach((b, k) => b.classList.toggle("on", k === i));

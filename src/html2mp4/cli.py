@@ -69,7 +69,7 @@ SETTLE_HOLD  = 0.6                      # fully built slide stays up this long b
 END_HOLD     = 1.6                      # hold on the last frame
 FADE_OUT     = 0.8                      # sound fades at the very end (the picture holds the last slide, as the page does)
 
-PAGE_CSS = "#bar,#start{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
+PAGE_CSS = "#bar,#start,#capbox{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
 
 PAGE_JS = """
 (ids) => {
@@ -79,15 +79,21 @@ PAGE_JS = """
   const stage = document.getElementById('stage');
   const started = new Map();
   const secs = v => v.split(',').map(x => parseFloat(x) * (x.trim().endsWith('ms') ? 0.001 : 1));
-  const span = e => {                     // longest delay+duration of the element's transitions/animations
-    const cs = getComputedStyle(e); let m = 0;
-    const pairs = [[cs.transitionDelay, cs.transitionDuration]];
-    if (cs.animationName !== 'none') pairs.push([cs.animationDelay, cs.animationDuration]);
-    pairs.forEach(([d, u]) => { d = secs(d); secs(u).forEach((x, i) => m = Math.max(m, x + (d[i % d.length] || 0))); });
+  const span = root => {                  // longest delay+duration of the element's (and its children's) transitions and finite animations
+    let m = 0;
+    [root, ...root.querySelectorAll('*')].forEach(e => {
+      const cs = getComputedStyle(e);
+      const pairs = [[cs.transitionDelay, cs.transitionDuration]];
+      if (cs.animationName !== 'none' && cs.animationIterationCount !== 'infinite') pairs.push([cs.animationDelay, cs.animationDuration]);
+      pairs.forEach(([d, u]) => { d = secs(d); secs(u).forEach((x, i) => m = Math.max(m, x + (d[i % d.length] || 0))); });
+    });
     return m;
   };
+  // A transition or one-off animation starts the moment it is first seen. A looping (ambient) animation runs on absolute time,
+  // so every render worker, and the page itself, agrees on where it is at any frame.
+  const loops = a => { try { return a.effect.getComputedTiming().iterations === Infinity; } catch (e) { return false; } };
   const seek = t => document.getAnimations().forEach(a => {
-    if (!started.has(a)) { started.set(a, t); a.pause(); }
+    if (!started.has(a)) { started.set(a, loops(a) ? 0 : t); a.pause(); }
     a.currentTime = Math.max(0, (t - started.get(a)) * 1000);
   });
   const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -107,7 +113,7 @@ PAGE_JS = """
     reset: () => {
       scenes.forEach(s => s.classList.remove('active'));
       items.flat().forEach(e => e.classList.remove('on'));
-      document.getAnimations().forEach(a => a.finish());
+      document.getAnimations().forEach(a => { try { if (a.effect.getComputedTiming().iterations !== Infinity) a.finish(); } catch (e) {} });
       started.clear();
     },
     show: (si, ci, t) => {                // same rule as the page's own render()

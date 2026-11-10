@@ -89,10 +89,14 @@ canvas) isn't synchronised and should be avoided.
 If an element's animation would still be running when the narration moves to the next slide, the renderer holds the
 slide until it finishes. Long delays therefore lengthen the video rather than being cut off.
 
+Endlessly looping animations (`animation-iteration-count: infinite`, such as a gentle float or a glow) are supported too. They run
+on absolute time, so every parallel render worker agrees on where a loop is at any frame, and they never hold a slide. A transition
+or finite animation counts from the moment it first starts, which is when its slide or step appears.
+
 ### Optional player controls
 
-A module may include its own in-browser player: a control bar with the id `bar` and a start overlay with the id
-`start`. Both are hidden in the video. Anything else on the stage appears exactly as it does in the browser.
+A module may include its own in-browser player: a control bar with the id `bar`, a caption box with the id `capbox` and a start
+overlay with the id `start`. All three are hidden in the video. Anything else on the stage appears exactly as it does in the browser.
 
 ## Modules designed by the Studio
 

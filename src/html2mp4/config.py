@@ -92,6 +92,19 @@ def set_design_quality(value):
 def design_effort(): return DESIGN_EFFORTS.get(design_quality(), "medium")
 
 
+# ---------------------------------------------------------------- motion
+
+MOTIONS = ("lively", "calm")
+
+
+def motion(): return load().get("motion", "lively")
+
+
+def set_motion(value):
+    if value not in MOTIONS: raise ValueError("motion must be lively or calm")
+    data = load(); data["motion"] = value; save(data)
+
+
 # ---------------------------------------------------------------- glossary
 
 DEFAULT_GLOSSARY = {"pronunciations": {}, "banned": [], "approved": []}
