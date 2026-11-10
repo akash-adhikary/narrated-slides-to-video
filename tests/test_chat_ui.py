@@ -14,13 +14,14 @@ class U: input_tokens, output_tokens = 2000, 400
 def fake(system, content, schema, effort="low", max_tokens=0, on_text=None, on_thinking=None, messages=None):
     last = messages[-1]["content"]
     if "boom" in last: raise ai.AIError("Anthropic's rate limit was reached. Wait a minute and try again.")
-    if "<script>" in last and "flow" in last.split("The person says:")[-1]:
+    said, has_slides = last.split("The person says:")[-1], "\n## " in last           # a new module's script is only its title line
+    if has_slides and "flow" in said:
         a = {"reply": "Making it a flow.", "script": None, "edits": [], "summary": [], "visual_requests": [{"slides": ["s1"], "request": "make it a flow"}], "suggestions": []}
-    elif "<script>" in last:
+    elif "write" in said.lower():
+        a = {"reply": "Here is a **first draft**.\n\n- A title\n- Your first day", "script": DRAFT, "summary": ["Wrote a draft"], "visual_requests": [], "suggestions": ["Make it shorter"]}
+    elif has_slides:
         cur = last.split("<script>\n")[1].split("\n</script>")[0]
         a = {"reply": "Reworded it.", "script": cur.replace("you meet your buddy", "your buddy meets you") + "\n", "summary": ["Reworded slide 1"], "visual_requests": [], "suggestions": []}
-    elif "write" in last.lower():
-        a = {"reply": "Here is a **first draft**.\n\n- A title\n- Your first day", "script": DRAFT, "summary": ["Wrote a draft"], "visual_requests": [], "suggestions": ["Make it shorter"]}
     else:
         a = {"reply": "Who is it for?", "script": None, "summary": [], "visual_requests": [], "suggestions": ["New hires"]}
     txt = json.dumps(a)
@@ -45,12 +46,26 @@ def app(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def page(app):
+def bare(app):
+    """The Write page as a visitor first sees it: no module open yet."""
     with sync_playwright() as p:
         b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1100, "height": 800})
-        pg.goto(app + "/#write"); pg.wait_for_selector("#aiOrb")
+        pg.goto(app + "/#write"); pg.wait_for_selector("#wStart")
         yield pg
         b.close()
+
+
+def new_module(page, name):
+    page.evaluate("scrollTo(0, 0)")
+    if page.is_visible("#aiClose"): page.click("#aiClose")
+    page.click("#wStart" if page.is_visible("#wStart") else "#wNew"); page.fill("#ndInput", name); page.keyboard.press("Enter")
+    page.wait_for_function("n => W.current && W.current.name === n", arg=name); page.wait_for_selector("#cardScript", state="visible")
+
+
+@pytest.fixture
+def page(bare):
+    new_module(bare, "Onboarding")
+    return bare
 
 
 def idle(page): page.wait_for_function("!C.busy")
@@ -77,7 +92,7 @@ def test_the_assistant_builds_edits_and_undoes_a_script(page):
     assert "What's the video about?" in page.inner_text("#aiLog")
     send(page, "I need a video on onboarding")
     page.wait_for_selector(".ai-msg.bot:has-text('Who is it for?')")
-    assert page.input_value("#wScript") == ""
+    assert page.input_value("#wScript") == "Title: Onboarding\n"
     idle(page); page.click("#aiChips button")                        # "New hires" chip
     page.wait_for_selector(".ai-msg.user:has-text('New hires')")
     send(page, "please write it")
@@ -110,8 +125,10 @@ def test_failures_are_shown_plainly_and_the_chat_keeps_working(page):
 
 def test_the_conversation_survives_a_reload_and_new_chat_clears_it(page, app):
     page.click("#aiOrb"); send(page, "hello there"); page.wait_for_selector(".ai-msg.bot")
-    page.reload(); page.wait_for_selector("#aiOrb"); page.click("#aiOrb")
-    assert "hello there" in page.inner_text("#aiLog") and "Who is it for?" in page.inner_text("#aiLog")
+    page.wait_for_function("W.project"); page.wait_for_timeout(500)                    # the chat is saved with the module a moment after the reply
+    page.reload(); page.click("#aiOrb")
+    page.wait_for_function("document.querySelector('#aiLog').textContent.includes('hello there')")
+    assert "Who is it for?" in page.inner_text("#aiLog")
     page.click("#aiNew")
     assert "What's the video about?" in page.inner_text("#aiLog")
 
@@ -120,8 +137,10 @@ def test_it_opens_with_the_keyboard_closes_with_escape_and_lives_on_the_write_pa
     page.focus("#aiOrb"); page.keyboard.press("Enter"); page.wait_for_selector("#aiPanel:not([hidden])")
     page.wait_for_function("document.activeElement.id === 'aiInput'")
     page.keyboard.press("Escape"); assert page.is_hidden("#aiPanel") and page.evaluate("document.activeElement.id") == "aiOrb"
+    pid = page.evaluate("W.project")
     page.goto(app + "/#settings"); assert page.is_hidden("#aiOrb")
-    page.goto(app + "/#write"); assert page.is_visible("#aiOrb")
+    page.goto(app + "/#write/" + pid); assert page.is_visible("#aiOrb")
+    page.goto(app + "/#write"); page.wait_for_selector("#aiOrb", state="hidden")      # the module list has no assistant: it belongs to a module
 
 
 def test_the_chat_fits_a_phone_screen(page):
@@ -165,7 +184,6 @@ def test_visual_requests_arrive_as_one_card_and_a_quick_layout_explains_why_it_c
 
 def test_share_menu_yaml_view_and_opening_a_module_file(page, app, tmp_path):
     pid = quick_project(app)
-    page.goto(app + "/#write"); page.wait_for_selector("#aiOrb")
     page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#rvShare", state="visible")
     page.click("#rvShare summary")
     assert page.is_visible("#rvFile") and page.get_attribute("#rvFileAll", "href").endswith("history=true")
@@ -179,3 +197,63 @@ def test_share_menu_yaml_view_and_opening_a_module_file(page, app, tmp_path):
     page.set_input_files("#wImport", str(saved))
     page.wait_for_function("document.querySelector('#toast').textContent.startsWith('Opened')")
     assert page.evaluate("W.project") != pid
+
+
+def test_nothing_to_write_in_until_a_module_has_a_name(bare, app):
+    assert bare.is_hidden("#cardScript") and bare.is_hidden("#aiOrb") and bare.is_visible("#wHero")
+    bare.click("#wStart"); assert bare.evaluate("document.querySelector('#nameDlg').open") and bare.evaluate("document.activeElement.id") == "ndInput"
+    assert bare.evaluate("getComputedStyle(document.querySelector('#nameDlg'), '::backdrop').backdropFilter").startswith("blur")
+    bare.keyboard.press("Enter"); assert "Give the module a name" in bare.inner_text("#ndErr")
+    bare.keyboard.press("Escape"); assert not bare.evaluate("document.querySelector('#nameDlg').open")
+    assert bare.is_hidden("#cardScript") and json.load(__import__("urllib.request").request.urlopen(app + "/api/projects")) == []          # cancelling made nothing
+
+
+def test_naming_a_module_opens_it_and_ties_everything_to_it(bare, app):
+    bare.click("#wStart"); bare.fill("#ndInput", "Interviewing candidates"); bare.click("#ndNum")
+    assert bare.input_value("#ndInput") == "01 · Interviewing candidates"
+    bare.keyboard.press("Enter"); bare.wait_for_selector("#cardScript", state="visible")
+    pid = bare.evaluate("W.project")
+    assert bare.url.endswith("#write/" + pid) and bare.inner_text("#wNameText") == "01 · Interviewing candidates" and bare.title().startswith("01 · Interviewing candidates")
+    assert bare.input_value("#wScript") == "Title: Interviewing candidates\n" and bare.evaluate("document.activeElement.id") == "wScript"
+    assert bare.is_visible("#aiOrb"); bare.click("#aiOrb"); assert bare.inner_text("#aiModule") == "01 · Interviewing candidates"
+    bare.click("#aiClose"); bare.evaluate("scrollTo(0, 0)"); bare.click("#wNew"); bare.click("#ndNum"); assert bare.input_value("#ndInput").startswith("02 · ")     # the next number
+    bare.fill("#ndInput", "01 · interviewing CANDIDATES"); bare.keyboard.press("Enter")
+    bare.wait_for_function("document.querySelector('#ndErr').textContent.includes('already have a module')")
+    assert bare.evaluate("document.querySelector('#nameDlg').open") and bare.evaluate("W.project") == pid       # nothing was made, still in the first module
+
+
+def test_rename_in_place_keeps_the_address(page):
+    pid = page.evaluate("W.project"); url = page.url
+    page.click("#wName"); page.fill("#wNameInput", "03 · Renamed"); page.keyboard.press("Enter")
+    page.wait_for_function("document.querySelector('#wNameText').textContent === '03 · Renamed'")
+    assert page.url == url and page.evaluate("W.project") == pid and "03 · Renamed" in page.title()
+    page.click("#wName"); page.keyboard.press("Escape"); assert page.inner_text("#wNameText") == "03 · Renamed" and page.is_visible("#wName")
+    page.goto(page.url.split("#")[0] + "#write"); page.wait_for_selector("#modList .mod")
+    assert page.inner_text("#modList .mod-t") == "03 · Renamed"
+
+
+def test_what_you_type_is_kept_and_the_address_reopens_the_module(page, app):
+    page.fill("#wScript", DRAFT)
+    page.wait_for_function("document.querySelector('#wSaved').textContent === 'Saved'")
+    page.reload(); page.wait_for_selector("#cardScript", state="visible")
+    assert page.input_value("#wScript") == DRAFT and page.inner_text("#wNameText") == "Onboarding"
+    page.fill("#wScript", DRAFT + "\n## Last\nSay: Bye.\n"); page.goto(app + "/#settings")                    # leaving straight away still saves
+    page.go_back(); page.wait_for_selector("#cardScript", state="visible")
+    page.wait_for_function("W.project && document.querySelector('#wScript').value.includes('## Last')")
+    page.click("a.crumb"); page.wait_for_selector("#wStart", state="visible")
+    assert page.url.endswith("#write") and page.is_hidden("#cardScript") and page.is_hidden("#aiOrb")
+    page.go_back(); page.wait_for_selector("#cardScript", state="visible"); assert page.inner_text("#wNameText") == "Onboarding"
+
+
+def test_each_module_has_its_own_conversation(page):
+    page.click("#aiOrb"); send(page, "hello there"); page.wait_for_selector(".ai-msg.bot")
+    page.wait_for_function("document.querySelectorAll('.ai-msg').length >= 2")
+    first = page.evaluate("W.project")
+    new_module(page, "Second one"); page.wait_for_function("W.project !== '%s'" % first)
+    page.wait_for_function("document.querySelector('#aiModule').textContent === 'Second one'")
+    if page.is_hidden("#aiPanel"): page.click("#aiOrb")
+    page.wait_for_function("!document.querySelector('#aiLog').textContent.includes('hello there')")
+    assert "What's the video about?" in page.inner_text("#aiLog")
+    page.goto(page.url.split("#")[0] + "#write/" + first); page.wait_for_function("W.project === '%s'" % first)
+    if page.is_hidden("#aiPanel"): page.click("#aiOrb")
+    page.wait_for_function("document.querySelector('#aiLog').textContent.includes('hello there')")

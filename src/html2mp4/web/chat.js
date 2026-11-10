@@ -2,10 +2,22 @@
 // It edits the script box on the Write page (with an undo); designing slides stays an explicit step.
 const C = {open: false, busy: false, items: [], cost: 0, rec: null, listening: false, auto: (() => { try{ return localStorage.getItem("h2m-chat-auto") === "1"; }catch{ return false; } })()};
 const aiEl = {panel: $("#aiPanel"), orb: $("#aiOrb"), log: $("#aiLog"), chips: $("#aiChips"), input: $("#aiInput"), send: $("#aiSend"), state: $("#aiState")};
-const chatKey = () => "h2m-chat:" + (W.project || "draft");
+// The conversation belongs to the module and is kept with it (on disk, not in the browser), so it is there on any device and after a reload.
 const store = {
-  load(){ try{ return JSON.parse(localStorage.getItem(chatKey()) || "[]"); }catch{ return []; } },
-  save(){ try{ localStorage.setItem(chatKey(), JSON.stringify(C.items.filter(i => i.text || i.kind).slice(-60).map(({before, running, state, ...rest}) => rest))); }catch{} },
+  async load(pid){
+    try{
+      const items = (await api(`/api/projects/${pid}/chat`)).items;
+      if(items.length) return items;
+      const old = JSON.parse(localStorage.getItem("h2m-chat:" + pid) || "[]");           // a conversation this browser kept before chats lived with the module
+      if(old.length){ post(`/api/projects/${pid}/chat`, {items: old}, "PUT").catch(() => {}); return old; }
+    }catch{}
+    return [];
+  },
+  save(pid){
+    pid = pid || chatFor; if(!pid) return;
+    const items = C.items.filter(i => i.text || i.kind).slice(-60).map(({before, running, state, ...rest}) => rest);
+    post(`/api/projects/${pid}/chat`, {items}, "PUT").catch(() => {});
+  },
 };
 const STARTERS_NEW = ["Help me plan a module from scratch", "Write a 5 minute script on a topic", "I'll paste my notes"];
 const STARTERS_HAVE = ["Make it shorter", "Make the opening more engaging", "Add a closing recap slide"];
@@ -28,7 +40,7 @@ function md(text){
 function setOpen(on){
   C.open = on; aiEl.panel.hidden = !on; aiEl.orb.setAttribute("aria-expanded", on);
   aiEl.orb.setAttribute("aria-label", on ? "Close the script assistant" : "Open the script assistant"); aiEl.orb.classList.remove("hello");
-  if(on){ if(!C.items.length) C.items = store.load(); render(); setTimeout(() => aiEl.input.focus(), 60); }
+  if(on){ render(); setTimeout(() => aiEl.input.focus(), 60); }
 }
 aiEl.orb.addEventListener("click", () => setOpen(!C.open));
 $("#aiClose").addEventListener("click", () => { setOpen(false); aiEl.orb.focus(); });
@@ -37,19 +49,20 @@ $("#wAsk").addEventListener("click", () => setOpen(true));
 addEventListener("keydown", e => { if(e.key === "Escape" && C.open && aiEl.panel.contains(document.activeElement)){ setOpen(false); aiEl.orb.focus(); } });
 $("#aiNew").addEventListener("click", () => {
   if(C.busy) return;
-  C.items = []; C.cost = 0; store.save(); try{ localStorage.removeItem(chatKey()); }catch{} render(); aiEl.input.focus();
+  C.items = []; C.cost = 0; store.save(); try{ localStorage.removeItem("h2m-chat:" + chatFor); }catch{} render(); aiEl.input.focus();
 });
 setTimeout(() => { if(!C.open && document.body.dataset.page === "write"){ aiEl.orb.classList.add("hello"); setTimeout(() => aiEl.orb.classList.remove("hello"), 7000); } }, 1200);
-// Switching module on the Write page switches the conversation too. A draft conversation moves to the module that its first design
-// creates (W.adopt, set when "Design slides" makes a new module); opening any other module just shows that module's own chat.
-let chatFor = chatKey();
-setInterval(() => {
-  if(chatKey() === chatFor || C.busy || C.items.some(i => i.running)) return;
-  const from = chatFor; chatFor = chatKey();
-  if(from === "h2m-chat:draft" && W.adopt && W.adopt === W.project){ store.save(); try{ localStorage.removeItem(from); }catch{} W.adopt = null; }
-  else{ C.items = store.load(); C.cost = 0; }
-  if(C.open) render();
-}, 400);
+// Opening another module brings its own conversation (and leaving for the module list closes the assistant). Not while a reply is on its way.
+let chatFor = null;
+async function switchChat(){
+  if(chatFor === W.project || C.busy || C.items.some(i => i.running)) return;
+  const pid = chatFor = W.project; C.cost = 0; C.items = []; C.stage = "";
+  if(!pid){ if(C.open) setOpen(false); return; }
+  const items = await store.load(pid);
+  if(chatFor !== pid || W.project !== pid){ chatFor = null; return; }                // moved on while it loaded: try again for the new one
+  C.items = [...items, ...C.items]; render();                                          // anything said while it loaded stays
+}
+setInterval(switchChat, 300);                                                          // (and straight away when a module opens: see showModule)
 
 /* ---------- drawing the conversation ---------- */
 const slideTitle = id => id === "s0" ? "Title slide" : ((W.outline && W.outline.slides.find(x => x.id === id)) || {}).title || id;
@@ -71,7 +84,7 @@ function card(i, idx){
 function render(){
   const log = aiEl.log, atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80 || !log.children.length;
   if(!C.items.length){
-    const have = !!box.value.trim();
+    const have = /^##\s/m.test(box.value);                                  // a script with slides in it (a new module is only its title)
     log.innerHTML = `<div class="ai-hello"><div class="big">${have ? "Let's improve your script." : "What's the video about?"}</div>
       <p>${have ? "Ask for changes in plain words: tone, length, a new slide, a stronger opening, or how a slide should look." : "Tell me the topic and who it's for, and I'll write a first draft. Then we'll tweak it together."}</p></div>`;
     renderChips(have ? STARTERS_HAVE : STARTERS_NEW);
@@ -92,6 +105,7 @@ function render(){
   $("#aiAutoRow").hidden = !designed();
   aiEl.panel.classList.toggle("busy", C.busy);
   aiEl.send.disabled = C.busy;
+  $("#aiModule").textContent = W.current ? W.current.name : "";
   aiEl.state.textContent = C.busy ? (C.stage || "Thinking…") : C.cost ? `Ready · about $${C.cost.toFixed(2)} this chat` : "Ready when you are";
   if(atEnd) log.scrollTop = log.scrollHeight;
 }
@@ -118,6 +132,7 @@ $("#aiForm").addEventListener("submit", e => { e.preventDefault(); const t = aiE
 
 async function sendMessage(text){
   if(C.listening) stopListening();
+  const pid = W.project;                                       // this reply belongs to the module it was asked in, even if you move on
   aiEl.input.value = ""; autosize();
   C.items.push({role: "user", text}); C.busy = true; C.stage = "Thinking…";
   const bot = {role: "assistant", text: "", streaming: true}; C.items.push(bot); render();
@@ -135,19 +150,20 @@ async function sendMessage(text){
     if(j.status === "failed") throw new Error(j.error);
     const r = j.result; bot.text = r.reply; bot.streaming = false; bot.suggestions = r.suggestions; C.cost += r.cost || 0;
     let before = null;
-    if(r.script){
+    const here = W.project === pid;
+    if(r.script && here){
       before = box.value; box.value = r.script; draft.set(r.script); parseNow();
       box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
     }
-    if(r.script || r.visual_requests.length){
+    if((r.script && here) || r.visual_requests.length){
       const c = {kind: "update", changes: r.changes, summary: r.summary, requests: r.visual_requests, before};
       C.items.push(c);
-      if(C.auto && designed()) setTimeout(() => applyCard(c), 0);
+      if(C.auto && designed() && here) setTimeout(() => applyCard(c), 0);
     }
   }catch(err){
     C.items = C.items.filter(i => i !== bot); C.items.push({role: "assistant", error: true, text: err.message});
   }finally{
-    C.busy = false; C.stage = ""; bot.streaming = false; chatFor = chatKey(); store.save(); render(); if(C.open) aiEl.input.focus();
+    C.busy = false; C.stage = ""; bot.streaming = false; store.save(pid); render(); if(C.open) aiEl.input.focus();
   }
 }
 

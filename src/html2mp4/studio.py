@@ -502,9 +502,9 @@ class ChatIn(BaseModel):
     project_id: str | None = None
 
 
-def run_chat(job, body, designed, slides):
+def run_chat(job, body, designed, slides, module=None):
     try:
-        res = chat.turn(body.messages, body.script, designed, slides, on_reply=lambda t: job.update(reply=t))
+        res = chat.turn(body.messages, body.script, designed, slides, on_reply=lambda t: job.update(reply=t), module=module)
         job.update(status="done", result=res, reply=res["reply"])
     except ai.AIError as e:
         job.update(status="failed", error=str(e))
@@ -524,7 +524,8 @@ def write_chat(body: ChatIn):
     for k in [k for k, j in chat_jobs.items() if time.time() - j["created"] > 3600]: chat_jobs.pop(k, None)
     jid = uuid.uuid4().hex[:10]
     job = chat_jobs[jid] = {"id": jid, "status": "running", "reply": "", "created": time.time()}
-    threading.Thread(target=run_chat, args=(job, body, designed, slides), daemon=True).start()
+    module = {"name": p["name"], "version": p["current"] or None} if p else None
+    threading.Thread(target=run_chat, args=(job, body, designed, slides, module), daemon=True).start()
     return {"id": jid}
 
 
@@ -646,10 +647,12 @@ def write_active():
 def project_view(pid):
     p = projects.get(pid)
     if not p: raise HTTPException(404, "That module wasn't found.")
-    try: m = script.parse(p["script"]); outl = outline(m)
-    except script.ScriptError: outl = None
+    shown = projects.working_script(p)
+    try: m = script.parse(shown); outl, title = outline(m), m.title
+    except script.ScriptError: outl, title = None, p["title"]
     cur = next((v for v in p["versions"] if v["n"] == p["current"]), None)
-    return {**{k: p[k] for k in ("id", "title", "script", "created", "updated", "current", "feedback")},
+    return {**{k: p[k] for k in ("id", "name", "created", "updated", "current", "feedback")}, "title": title, "script": shown,
+            "designed_script": p["script"] if p["versions"] else "",
             "versions": [{k: v[k] for k in ("n", "at", "note", "cost", "mode")} for v in p["versions"]],
             "issues": (cur or {}).get("issues", []), "outline": outl,
             "slides": {k: {"layout": v["layout"], "summary": v["summary"]} for k, v in projects.slides(pid).items()}}
@@ -657,6 +660,56 @@ def project_view(pid):
 
 @app.get("/api/projects")
 def list_projects(): return projects.listing()
+
+
+class NewModuleIn(BaseModel):
+    name: str
+
+
+@app.post("/api/projects")
+def create_project(body: NewModuleIn):
+    """Start a module: a name, and a script that begins with the video's title (the name without its number)."""
+    try: name = projects.clean_name(body.name)
+    except ValueError as e: raise HTTPException(400, str(e))
+    if projects.name_taken(name): raise HTTPException(409, f"You already have a module called “{name}”.")
+    title = projects.video_title(name)
+    p = projects.create(title, f"Title: {title}\n", name=name)
+    return project_view(p["id"])
+
+
+class PatchIn(BaseModel):
+    name: str | None = None
+    script: str | None = None
+
+
+@app.patch("/api/projects/{pid}")
+def patch_project(pid: str, body: PatchIn):
+    """Rename a module (its id and address stay the same) and/or save the script as it is being written."""
+    if not projects.get(pid): raise HTTPException(404, "That module wasn't found.")
+    if body.name is not None:
+        try: projects.rename(pid, body.name)
+        except ValueError as e: raise HTTPException(409 if "already have" in str(e) else 400, str(e))
+    if body.script is not None:
+        if len(body.script) > 400_000: raise HTTPException(413, "That script is too long.")
+        projects.save_draft(pid, body.script)
+    p = projects.get(pid)
+    return {"id": pid, "name": p["name"], "updated": p["updated"]}
+
+
+@app.get("/api/projects/{pid}/chat")
+def get_chat(pid: str):
+    if not projects.get(pid): raise HTTPException(404)
+    return {"items": projects.chat_load(pid)}
+
+
+class ChatSaveIn(BaseModel):
+    items: list[dict]
+
+
+@app.put("/api/projects/{pid}/chat")
+def put_chat(pid: str, body: ChatSaveIn):
+    if not projects.get(pid): raise HTTPException(404)
+    projects.chat_save(pid, body.items); return {"ok": True}
 
 
 @app.get("/api/projects/{pid}")
@@ -677,6 +730,13 @@ def project_module(pid: str, v: int | None = None):
     return HTMLResponse(compose.refresh_player(page), headers={"Cache-Control": "no-store"})
 
 
+def attachment(filename):
+    """A Content-Disposition for a file name that may hold characters like "·": a plain fallback plus the UTF-8 form browsers prefer."""
+    from urllib.parse import quote
+    plain = re.sub(r'[^\x20-\x7e]', "", filename).replace('"', "").strip() or "module"
+    return f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(filename)}"
+
+
 @app.get("/api/projects/{pid}/download")
 def download_module(pid: str, v: int | None = None):
     """The module as one HTML file to review or share: it plays with the browser's voice, works offline (fonts embedded) and can be
@@ -685,8 +745,8 @@ def download_module(pid: str, v: int | None = None):
     if not p: raise HTTPException(404)
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
-    name = re.sub(r'[^\w\- ]+', "", p["title"]).strip() or "module"
-    return HTMLResponse(compose.embed_fonts(compose.refresh_player(page)), headers={"Content-Disposition": f'attachment; filename="{name}.html"', "Cache-Control": "no-store"})
+    name = re.sub(r'[^\w\-· ]+', "", p["name"]).strip() or "module"
+    return HTMLResponse(compose.embed_fonts(compose.refresh_player(page)), headers={"Content-Disposition": attachment(f"{name}.html"), "Cache-Control": "no-store"})
 
 
 @app.post("/api/projects/import")
@@ -705,7 +765,7 @@ def import_module(file: UploadFile = File(...)):
     try: m = script.parse(data["script"])
     except script.ScriptError as e: raise HTTPException(422, f"The script inside this file couldn't be read: {e}")
     slides = data.get("slides") if isinstance(data.get("slides"), dict) else None
-    p = projects.create(m.title, data["script"])
+    p = projects.create(m.title, data["script"], name=m.title)
     found = verify.inspect(page, m, config.glossary()["banned"], shots=False)["issues"]
     note = "Imported from a file" + (" (changed outside the Studio)" if data["edited"] else "")
     projects.save_version(p["id"], page, slides, note, issues=found, mode="design" if slides else "basic")
@@ -713,7 +773,7 @@ def import_module(file: UploadFile = File(...)):
     for word, said in (data.get("pronunciations") or {}).items():         # only words this computer doesn't have yet; nothing is overwritten
         if isinstance(word, str) and isinstance(said, str) and word not in config.glossary()["pronunciations"]: added[word] = said
     if added: config.set_glossary({"pronunciations": {**config.glossary()["pronunciations"], **added}})
-    return {"project": p["id"], "title": m.title, "edited": data["edited"], "pronunciations_added": len(added)}
+    return {"project": p["id"], "name": p["name"], "title": m.title, "edited": data["edited"], "pronunciations_added": len(added)}
 
 
 def import_module_file(text):
@@ -721,10 +781,12 @@ def import_module_file(text):
     try: got = modulefile.loads(text)
     except modulefile.ModuleFileError as e: raise HTTPException(422, str(e))
     doc = got["doc"]
-    try: m = script.parse(doc["script"])
-    except script.ScriptError as e: raise HTTPException(422, f"The script inside this file couldn't be read: {e}")
-    p = projects.create(m.title, doc["script"])
     versions = sorted((v for v in doc.get("versions") or [] if isinstance(v.get("html"), str)), key=lambda v: v["n"])
+    try: m = script.parse(doc["script"]); title = m.title
+    except script.ScriptError as e:
+        if versions: raise HTTPException(422, f"The script inside this file couldn't be read: {e}")
+        m, title = None, str(doc.get("title") or doc.get("name") or "Module")             # a module that is only a name and a title so far
+    p = projects.create(title, doc["script"], name=doc.get("name") or title)             # a name you already use gets "(2)" rather than a second copy of it
     for v in versions:
         slides = v.get("slides") if isinstance(v.get("slides"), dict) else None
         is_current = v["n"] == doc.get("current")
@@ -741,7 +803,7 @@ def import_module_file(text):
     for word, said in (doc.get("pronunciations") or {}).items():
         if isinstance(word, str) and isinstance(said, str) and word not in config.glossary()["pronunciations"]: added[word] = said
     if added: config.set_glossary({"pronunciations": {**config.glossary()["pronunciations"], **added}})
-    return {"project": p["id"], "title": m.title, "edited": got["edited"], "pronunciations_added": len(added),
+    return {"project": p["id"], "name": p["name"], "title": title, "edited": got["edited"], "pronunciations_added": len(added),
             "versions": len(versions), "designed": bool(versions)}
 
 
@@ -754,7 +816,7 @@ def export_module(pid: str, format: str = "json", history: bool = False, v: int 
     except modulefile.ModuleFileError as e: raise HTTPException(404, str(e))
     body = modulefile.dumps(doc, format)
     head = {"Cache-Control": "no-store"}
-    if not inline: head["Content-Disposition"] = f'attachment; filename="{modulefile.filename(doc["title"], format)}"'
+    if not inline: head["Content-Disposition"] = attachment(modulefile.filename(doc["name"], format))
     return Response(body, media_type="text/plain; charset=utf-8" if inline else ("application/x-yaml" if format == "yaml" else "application/json"), headers=head)
 
 
@@ -947,14 +1009,16 @@ def apply_changes(pid: str, body: ApplyIn):
 
 
 @app.post("/api/projects/{pid}/design")
-def design_project(pid: str, body: ScriptIn):
-    """Design every slide with Claude (used to upgrade a quick-layout module)."""
+def design_project(pid: str, body: GenerateIn):
+    """Design a module's slides for the first time (with Claude, or as the quick layout), or upgrade a quick layout to Claude's design."""
     p = projects.get(pid)
     if not p: raise HTTPException(404)
     parse_or_422(body.script, body.title, body.subtitle)
-    if not config.api_key_status()["set"]: raise HTTPException(400, "Add your Anthropic API key in Settings first.")
-    if body.script != p["script"]: projects.set_script(pid, body.script)
-    return {"job": start_design(pid, note="Designed with Claude"), "changed": []}
+    if body.mode == "design" and not config.api_key_status()["set"]:
+        raise HTTPException(400, "Designing slides needs an Anthropic API key. Add one in Settings, or choose the quick layout.")
+    projects.set_script(pid, body.script)
+    note = ("First design" if body.mode == "design" else "Quick layout") if not p["versions"] else "Designed with Claude"
+    return {"job": start_design(pid, note=note, mode=body.mode), "changed": []}
 
 
 class RestoreIn(BaseModel):
@@ -973,7 +1037,7 @@ def to_video(pid: str):
     p = projects.get(pid)
     if not p or not p["versions"]: raise HTTPException(404, "Design the slides first.")
     page = (projects.folder(pid) / "module.html").read_bytes()
-    return register_upload(f"{p['title']}.html", page) | {"project": pid}
+    return register_upload(f"{p['name']}.html", page) | {"project": pid}
 
 
 @app.get("/api/settings/glossary")

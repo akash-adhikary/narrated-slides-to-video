@@ -5,10 +5,19 @@ const KINDS = {typo: "Typo", clarity: "Clearer wording", risk: "Careful wording"
 const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const slideName = id => id === "s0" ? "Title slide" : id ? `Slide ${id.slice(1)}` : "Module";
 const post = (url, body, method = "POST") => api(url, {method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+// What you type is kept with the module as you go (a moment after you stop), so a closed tab or a crash loses nothing.
 const draft = {
-  get(){ try{ return sessionStorage.getItem("h2m-draft") || ""; }catch{ return ""; } },
-  set(v){ try{ sessionStorage.setItem("h2m-draft", v); }catch{} },
+  timer: null, pending: null,
+  set(text){ if(!W.project) return; this.pending = {pid: W.project, text}; $("#wSaved").textContent = "Saving…"; clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 700); },
+  async flush(){
+    clearTimeout(this.timer); const p = this.pending; this.pending = null; if(!p) return;
+    try{ await post(`/api/projects/${p.pid}`, {script: p.text}, "PATCH"); if(!this.pending) $("#wSaved").textContent = "Saved"; }
+    catch{ $("#wSaved").textContent = "Couldn't save. Is the Studio still running?"; }
+  },
 };
+const leaving = () => { const p = draft.pending; if(p) fetch(`/api/projects/${p.pid}`, {method: "PATCH", keepalive: true, headers: {"Content-Type": "application/json"}, body: JSON.stringify({script: p.text})}); };
+addEventListener("pagehide", leaving);
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") leaving(); });
 
 /* ---------- the script box ---------- */
 const box = $("#wScript");
@@ -22,19 +31,20 @@ async function parseNow(){
     $("#wStatus").className = "script-status ok"; $("#wStatus").textContent = `“${o.title}”: ready to design.`;
   }catch(err){
     W.outline = null; $("#wStats").textContent = "";
-    $("#wStatus").className = "script-status err"; $("#wStatus").textContent = err.message;
+    const fresh = /no slides/i.test(err.message);                          // a new module is just its title: not an error yet
+    $("#wStatus").className = "script-status" + (fresh ? "" : " err");
+    $("#wStatus").textContent = fresh ? "Nothing to design yet. Write your first slide, or ask the assistant to write the script." : err.message;
   }
   updateButtons();
 }
 function updateButtons(){
   const ok = !!W.outline, busy = W.busy;
-  $("#wDesign").disabled = !ok || busy || (W.project && W.mode !== "basic" && box.value === W.saved) || (W.project && W.mode === "basic" && !W.keySet);
+  $("#wDesign").disabled = !ok || busy || !W.project || (W.designed && W.mode !== "basic" && box.value === W.saved) || (W.designed && W.mode === "basic" && !W.keySet);
   $("#wReview").disabled = !ok || busy || !W.keySet;
-  $("#wBasic").hidden = !!W.project;
-  $("#wNew").hidden = !W.project;
-  $("#wDesignText").textContent = !W.project ? "Design slides" : W.mode === "basic" ? "Design with Claude" : "Update slides";
+  $("#wBasic").hidden = !!W.designed;
+  $("#wDesignText").textContent = !W.designed ? "Design slides" : W.mode === "basic" ? "Design with Claude" : "Update slides";
   $("#wCostHint").innerHTML = !W.keySet ? `Designing needs an API key. <a href="#settings">Add one in Settings</a>.`
-    : W.project ? "Only the slides you changed are redesigned." : COST_HINT[W.quality];
+    : W.designed ? "Only the slides you changed are redesigned." : COST_HINT[W.quality];
 }
 $("#wExample").addEventListener("click", async () => { box.value = (await api("/api/write/example")).script; draft.set(box.value); parseNow(); });
 $("#wFile").addEventListener("change", e => {
@@ -46,7 +56,7 @@ $("#wImport").addEventListener("change", async e => {
   const fd = new FormData(); fd.append("file", f);
   try{
     const r = await api("/api/projects/import", {method: "POST", body: fd});
-    await openProject(r.project); loadModules(); $("#cardReview").scrollIntoView({behavior: "smooth"});
+    await openProject(r.project); loadModules(); (r.designed === false ? $("#cardScript") : $("#cardReview")).scrollIntoView({behavior: "smooth"});
     toast(r.versions > 1 ? `Opened with its ${r.versions} versions.` + (r.edited ? " The file was edited by hand." : "")
       : r.designed === false ? "Opened the script. Design the slides when you're ready."
       : r.edited ? "Opened. This file was changed outside the Studio, so later redesigns start from the Studio's own version of the slides."
@@ -54,12 +64,6 @@ $("#wImport").addEventListener("change", async e => {
   }catch(err){ toast(err.message); }
 });
 $("#wHelp").addEventListener("click", () => { $("#wHelpBox").hidden = !$("#wHelpBox").hidden; });
-$("#wNew").addEventListener("click", () => {
-  W.project = null; W.saved = ""; box.value = ""; draft.set(""); W.outline = null;
-  $("#cardReview").hidden = true; $("#wSuggest").innerHTML = ""; $("#wStats").textContent = ""; $("#wStatus").textContent = "";
-  updateButtons(); scrollTo({top: 0, behavior: "smooth"});
-});
-
 /* ---------- suggestions ---------- */
 $("#wReview").addEventListener("click", async () => {
   W.busy = true; updateButtons(); $("#wReview").lastChild.textContent = "Checking…";
@@ -96,15 +100,19 @@ function renderSuggestions(list){
 /* ---------- designing ---------- */
 async function startJob(promise){
   W.busy = true; updateButtons();
-  try{ const r = await promise; if(r.job){ if(r.project && r.project !== W.project) W.adopt = r.project; trackJob(r.job, r.project); } else { W.busy = false; updateButtons(); toast("Nothing has changed"); } return r; }
+  try{ const r = await promise; if(r.job){ trackJob(r.job, r.project); } else { W.busy = false; updateButtons(); toast("Nothing has changed"); } return r; }
   catch(err){ W.busy = false; updateButtons(); toast(err.message); }
 }
-$("#wDesign").addEventListener("click", () => {
-  if(W.project && W.mode === "basic") startJob(post(`/api/projects/${W.project}/design`, {script: box.value}).then(r => ({...r, project: W.project})));
-  else if(W.project) startJob(post(`/api/projects/${W.project}/script`, {script: box.value}, "PUT").then(r => ({...r, project: W.project})));
-  else startJob(post("/api/write/generate", {script: box.value, mode: "design"}));
+$("#wDesign").addEventListener("click", async () => {
+  if(!W.project) return;
+  await draft.flush();
+  if(W.designed && W.mode !== "basic") startJob(post(`/api/projects/${W.project}/script`, {script: box.value}, "PUT").then(r => ({...r, project: W.project})));
+  else startJob(post(`/api/projects/${W.project}/design`, {script: box.value, mode: "design"}).then(r => ({...r, project: W.project})));   // first design, or a quick layout upgraded
 });
-$("#wBasic").addEventListener("click", () => startJob(post("/api/write/generate", {script: box.value, mode: "basic"})));
+$("#wBasic").addEventListener("click", async () => {
+  if(!W.project) return; await draft.flush();
+  startJob(post(`/api/projects/${W.project}/design`, {script: box.value, mode: "basic"}).then(r => ({...r, project: W.project})));
+});
 
 const PHASES = ["plan", "write", "check", "fix", "review"];
 function renderPhases(phase){
@@ -139,7 +147,9 @@ function trackJob(job, project, quiet){
       clearInterval(W.jobTimer); W.busy = false; $("#cardJob").hidden = true;
       if(j.status === "failed") toast(j.error || "The design failed");
       else toast(j.cost ? `Done. Claude usage about $${j.cost.toFixed(2)}` : "Done");
-      await openProject(project || job.project); loadModules();
+      const pid = project || job.project;
+      if(W.project === pid) await openProject(pid);                          // only if you're still in that module
+      loadModules();
     }
   };
   tick(); W.jobTimer = setInterval(tick, 1000);
@@ -153,12 +163,15 @@ function slideStarts(o){
   return rows;
 }
 async function openProject(pid, version){
+  if(W.project && W.project !== pid) await draft.flush();                       // what was being typed in the module we're leaving
   const p = await api(`/api/projects/${pid}`);
-  W.project = pid; W.current = p; W.saved = p.script; W.version = version || p.current;
+  W.project = pid; W.current = p; W.designed = p.versions.length > 0; W.saved = p.designed_script; W.version = version || p.current;
   W.mode = (p.versions.find(v => v.n === p.current) || {}).mode || "design";
-  if(box.value !== p.script){ box.value = p.script; draft.set(p.script); }
-  await parseNow(); W.saved = p.script;
-  if(!p.versions.length){ updateButtons(); return; }
+  if(box.value !== p.script) box.value = p.script;
+  $("#wSaved").textContent = "";
+  showModule(p);
+  await parseNow();
+  if(!p.versions.length){ $("#cardReview").hidden = true; updateButtons(); return; }
   $("#cardReview").hidden = false;
   const o = W.outline || p.outline; W.rows = o ? slideStarts(o) : [];
   $("#rvMeta").textContent = p.title;
@@ -233,36 +246,101 @@ $("#rvUse").addEventListener("click", async () => {
   catch(err){ toast(err.message); }
 });
 
+/* ---------- a module has a name, and an address (#write/<id>) ---------- */
+const SITE = document.title;
+function showModule(p){
+  document.body.dataset.module = p.id; if(typeof switchChat === "function") switchChat();
+  $("#wHero").hidden = true; $("#wHead").hidden = false; $("#cardScript").hidden = false;
+  setHead(p);
+  if(document.body.dataset.page === "write" && location.hash !== `#write/${encodeURIComponent(p.id)}`) history.replaceState(null, "", `#write/${encodeURIComponent(p.id)}`);
+  document.querySelector('.tabs a[data-page="write"]').setAttribute("href", `#write/${encodeURIComponent(p.id)}`);   // the Write tab goes back to this module
+}
+function setHead(p){
+  $("#wNameText").textContent = p.name; document.title = `${p.name} · ${SITE}`;
+  const st = $("#wState"), n = p.versions.length;
+  st.textContent = n ? `Designed · version ${p.current}` : "Not designed yet"; st.classList.toggle("on", n > 0);
+}
+function showHome(){
+  clearTimeout(W.parseTimer); W.project = null; W.current = null; W.designed = false; W.outline = null; box.value = ""; W.saved = "";
+  delete document.body.dataset.module; document.title = SITE; if(typeof switchChat === "function") switchChat();
+  document.querySelector('.tabs a[data-page="write"]').setAttribute("href", "#write");
+  $("#wHero").hidden = false; $("#wHead").hidden = true; $("#cardScript").hidden = true; $("#cardReview").hidden = true;
+  $("#wSuggest").innerHTML = ""; $("#wStats").textContent = ""; $("#wStatus").textContent = "";
+  updateButtons(); loadModules();
+}
+// rename in place: click the name, type, Enter
+$("#wName").addEventListener("click", () => { $("#wName").hidden = true; $("#wNameForm").hidden = false; const i = $("#wNameInput"); i.value = W.current.name; i.focus(); i.select(); });
+const endRename = () => { $("#wNameForm").hidden = true; $("#wName").hidden = false; };
+$("#wNameInput").addEventListener("keydown", e => { if(e.key === "Escape"){ e.stopPropagation(); endRename(); $("#wName").focus(); } });
+$("#wNameInput").addEventListener("blur", () => setTimeout(endRename, 120));
+$("#wNameForm").addEventListener("submit", async e => {
+  e.preventDefault(); const v = $("#wNameInput").value.trim();
+  if(!v || v === W.current.name){ endRename(); return; }
+  try{ const r = await post(`/api/projects/${W.project}`, {name: v}, "PATCH"); W.current.name = r.name; setHead(W.current); endRename(); loadModules(); toast("Renamed"); }
+  catch(err){ toast(err.message); $("#wNameInput").focus(); }
+});
+
+// starting a module: a name first, over a blurred page; Esc or Cancel creates nothing
+const nd = {dlg: $("#nameDlg"), input: $("#ndInput"), err: $("#ndErr")};
+const NUM = /^\s*(\d+)\s*[·.:\-–—)]\s*/;
+function nextNumber(list){ const n = list.map(m => (m.name.match(NUM) || [])[1]).filter(Boolean).map(Number); return String((n.length ? Math.max(...n) : 0) + 1).padStart(2, "0"); }
+function openNameDialog(){
+  nd.input.value = ""; nd.err.hidden = true; nd.dlg.showModal(); nd.input.focus();
+  api("/api/projects").then(l => { W.list = l; }).catch(() => {});
+}
+$("#wStart").addEventListener("click", openNameDialog);
+$("#wNew").addEventListener("click", openNameDialog);
+$("#ndNum").addEventListener("click", () => { nd.input.value = `${nextNumber(W.list || [])} · ` + nd.input.value.replace(NUM, ""); nd.input.focus(); });
+$("#ndCancel").addEventListener("click", () => nd.dlg.close());
+nd.input.addEventListener("input", () => { nd.err.hidden = true; });
+$("#nameForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  if(!nd.input.value.trim()){ nd.err.textContent = "Give the module a name."; nd.err.hidden = false; nd.input.focus(); return; }
+  $("#ndGo").disabled = true;
+  try{
+    const p = await post("/api/projects", {name: nd.input.value});
+    nd.dlg.close(); W.focusScript = true; location.hash = `#write/${encodeURIComponent(p.id)}`; loadModules();
+  }catch(err){ nd.err.textContent = err.message; nd.err.hidden = false; nd.input.focus(); }
+  finally{ $("#ndGo").disabled = false; }
+});
+
 /* ---------- your modules ---------- */
 async function loadModules(){
-  const list = await api("/api/projects").catch(() => []);
+  const list = W.list = await api("/api/projects").catch(() => []);
   $("#modules").hidden = !list.length;
   $("#modList").innerHTML = list.map(m => `<article class="mod ${m.id === W.project ? "open" : ""}" data-id="${esc(m.id)}">
-    <div class="mod-t">${esc(m.title)}</div><div class="mod-m">${m.designed ? `${m.versions} version${m.versions > 1 ? "s" : ""}` : "Not designed yet"} · ${ago(m.updated)}</div>
+    <div class="mod-t">${esc(m.name)}</div><div class="mod-m">${m.title && m.title !== m.name ? `“${esc(m.title)}” · ` : ""}${m.designed ? `${m.versions} version${m.versions > 1 ? "s" : ""}` : "Not designed yet"} · ${ago(m.updated)}</div>
     <div class="mod-a"><button class="link" data-act="open">Open</button>${m.designed ? `<button class="link" data-act="video">Make video</button>` : ""}<button class="link rm" data-act="del">Delete</button></div></article>`).join("");
 }
 $("#modList").addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if(!b) return;
   const id = b.closest(".mod").dataset.id;
-  if(b.dataset.act === "open"){ await openProject(id); loadModules(); $("#cardScript").scrollIntoView({behavior: "smooth"}); }
+  if(b.dataset.act === "open") location.hash = `#write/${encodeURIComponent(id)}`;
   if(b.dataset.act === "video"){ try{ showUpload(await post(`/api/projects/${id}/to-video`, {})); location.hash = "#create"; }catch(err){ toast(err.message); } }
   if(b.dataset.act === "del" && confirm("Delete this module and all its versions? Videos you've made from it are not affected.")){
-    await api(`/api/projects/${id}`, {method: "DELETE"}); if(W.project === id) $("#wNew").click(); loadModules();
+    await api(`/api/projects/${id}`, {method: "DELETE"}); if(W.project === id){ draft.pending = null; location.hash = "#write"; } loadModules();
   }
 });
 
 /* ---------- start ---------- */
-pageHooks.write = async () => {
-  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced"; updateButtons(); loadModules();
+pageHooks.write = async arg => {
+  const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced";
+  if(arg){
+    if(arg !== W.project){
+      try{ await openProject(arg); }
+      catch{ toast("That module wasn't found."); location.hash = "#write"; return; }
+    }
+    updateButtons(); loadModules();
+    if(W.focusScript){ W.focusScript = false; box.focus(); box.setSelectionRange(box.value.length, box.value.length); }      // a module you just named: start writing
+  }else if(W.project){ await draft.flush(); showHome(); }
+  else{ updateButtons(); loadModules(); }
 };
 (async () => {
   const s = await api("/api/settings").catch(() => null); W.keySet = !!(s && s.api_key.set); W.quality = (s && s.design_quality) || "balanced";
   const active = await api("/api/write/active").catch(() => []);
-  if(active.length){ trackJob(active[0], active[0].project); await openProject(active[0].project).catch(() => {}); }
-  else{
-    const d = draft.get(); if(d){ box.value = d; await parseNow(); }
-    const list = await api("/api/projects").catch(() => []);
-    if(!d && list.length && !location.hash.includes("create")) { /* leave the page empty; the list below offers the modules */ }
+  if(active.length){                                                    // a design is still running: pick it up where it is
+    trackJob(active[0], active[0].project);
+    if(document.body.dataset.page === "write" && !location.hash.includes("/")) location.hash = `#write/${encodeURIComponent(active[0].project)}`;
   }
   updateButtons(); loadModules();
 })();

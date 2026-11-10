@@ -70,6 +70,12 @@ Say: Done well, it builds trust, speeds up growth, and prevents surprises at rev
   Avoid acronyms a voice may mispronounce unless the person uses them.
 - Open with something that earns attention (a question or a situation), not "In this module we will". End on one concrete action.
 
+# The module you are working on
+The context may begin with the module's name. That name is the person's own label for this piece of work (often numbered, like
+"08 · Interviewing candidates"); it is not the video's title and not part of the script. Refer to the module by that name when it
+helps, never invent a different one, and don't rename it or put it in the script unless they ask. The video's title is the `Title:`
+line in the script.
+
 # Slides that already exist
 The context says whether the slides are designed, and lists the slide ids (s0 is the title slide, s1 the first content slide, and so
 on) with the number each has in the person's slide list. If the slides are designed and the person wants something to LOOK different
@@ -151,9 +157,11 @@ def apply_edits(current, edits):
     return "\n\n".join(x.strip("\n") for x in out if x.strip()) + "\n"
 
 
-def context(current, designed, slides):
-    """What the assistant is told about the script and slides as they are right now."""
+def context(current, designed, slides, module=None):
+    """What the assistant is told about the module, the script and the slides as they are right now."""
     parts = []
+    if module:
+        parts.append(f"You are working on the module named \"{module['name']}\"" + (f", currently at version {module['version']}" if module.get("version") else "") + ".")
     if current and current.strip():
         parts.append("The script as it is right now (the person may have edited it by hand; build on this exact text):\n<script>\n"
                      + current.strip() + "\n</script>")
@@ -196,7 +204,7 @@ def diff(old_text, new_text):
     return rows
 
 
-def turn(messages, current_script="", designed=False, slides=None, on_reply=None, call=None):
+def turn(messages, current_script="", designed=False, slides=None, on_reply=None, call=None, module=None):
     """One assistant turn. `messages` is the conversation so far ([{role, content}], the last one from the person).
     Returns {reply, script, summary, visual_requests, suggestions, changes, cost}; `script` has been parsed and is safe to use."""
     call = call or ai.structured
@@ -205,7 +213,7 @@ def turn(messages, current_script="", designed=False, slides=None, on_reply=None
     if not msgs or msgs[-1]["role"] != "user": raise ai.AIError("Write a message first.")
     msgs = msgs[-24:]
     while msgs and msgs[0]["role"] != "user": msgs.pop(0)
-    ctx = context(current_script, designed, slides or {})
+    ctx = context(current_script, designed, slides or {}, module)
     last = msgs[-1]
     msgs[-1] = {"role": "user", "content": f"{ctx}\n\n---\nThe person says:\n{last['content']}"}
     cost, answer, bad = 0.0, None, None

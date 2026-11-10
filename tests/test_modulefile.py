@@ -18,7 +18,7 @@ def test_export_is_one_readable_file(client):
     r = export(client, pid)
     assert "attachment" in r.headers["content-disposition"] and ".h2m.json" in r.headers["content-disposition"]
     doc = r.json()
-    assert doc["format"] == "html2mp4.module" and doc["schema"] == 1 and doc["title"] == "Giving Feedback That Lands"
+    assert doc["format"] == "html2mp4.module" and doc["schema"] == 2 and doc["title"] == "Giving Feedback That Lands" and doc["name"] == "Giving Feedback That Lands"
     assert doc["script"] == script.EXAMPLE and len(doc["versions"]) == 1 and doc["current"] == 1
     assert "<section" in doc["versions"][0]["html"] and doc["integrity"]["sha256"] == modulefile.checksum(doc)
     assert set(doc["brand"]) <= set(modulefile.BRAND_KEYS)
@@ -86,3 +86,22 @@ def test_bad_files_say_what_is_wrong(client):
     assert "script inside" in err({**doc, "script": "not a script"})
     assert client.get("/api/projects/nope/export").status_code == 404
     assert client.get(f"/api/projects/{pid}/export", params={"format": "xml"}).status_code == 400
+
+
+def test_a_version_1_file_still_opens_and_its_title_becomes_the_name(client):
+    pid = _designed_project(client)
+    doc = export(client, pid).json()
+    old = {k: v for k, v in doc.items() if k != "name"} | {"schema": 1}
+    old["integrity"] = {"sha256": modulefile.checksum(old)}
+    got = reopen(client, json.dumps(old)).json()
+    assert got["edited"] is False and got["name"] == "Giving Feedback That Lands (2)"       # the name is taken by the original, so it gets a number
+
+
+def test_the_name_travels_in_the_file_and_names_the_download(client):
+    r = client.post("/api/projects", json={"name": "07 · Interviewing candidates"}); assert r.status_code == 200
+    pid = r.json()["id"]
+    out = export(client, pid)
+    assert "filename*=UTF-8''07%20%C2%B7%20Interviewing%20candidates.h2m.json" in out.headers["content-disposition"]
+    assert out.json()["name"] == "07 · Interviewing candidates" and out.json()["title"] == "Interviewing candidates"
+    got = reopen(client, out.text).json()
+    assert got["name"] == "07 · Interviewing candidates (2)"

@@ -7,6 +7,22 @@ to catch problems, and you refine the result until it's right.
 This page covers the script format, how the slides are designed and checked, and how to ask for changes. For making the
 video afterwards, see [Getting started](getting-started.md).
 
+## Modules and their names
+
+Everything on the Write page happens inside a **module**, and every module has a **name**. Press **Start a new module**, type a
+name, and the page opens it: the script box (starting with `Title:` filled in), the assistant, and the slides all belong to that
+module. Esc or Cancel creates nothing.
+
+- The **name** is your own label: it shows in your module list, in the page address (`#write/<id>`, so a reload, the back button
+  and a bookmark all return to the same module), in file names (the downloaded HTML and module file, and the video) and at the top
+  of the assistant. Numbering is up to you: **Use next number** prefixes `08 · ` after your highest number. Names are unique,
+  ignoring case.
+- The **video title** is the `Title:` line in the script, what viewers see on the title slide. Changing it never renames the module,
+  and renaming the module never changes the script.
+- Click the name in the header to **rename** it. Its address and folder stay the same, so links and history don't break.
+- What you type is **saved as you go** with the module, and so is your conversation with the assistant, so closing the tab loses
+  nothing and the chat is there from any browser on this Studio.
+
 ## Building the script with AI
 
 You don't have to write the script yourself. Press the glowing **Build with AI** button at the bottom right of the Write page (or
