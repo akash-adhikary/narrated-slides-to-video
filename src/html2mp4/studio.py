@@ -630,7 +630,7 @@ def project_module(pid: str, v: int | None = None):
     if not p: raise HTTPException(404)
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
-    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+    return HTMLResponse(compose.refresh_player(page), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/projects/{pid}/download")
@@ -642,7 +642,7 @@ def download_module(pid: str, v: int | None = None):
     page = projects.version_html(pid, v or p["current"])
     if page is None: raise HTTPException(404, "That version doesn't exist.")
     name = re.sub(r'[^\w\- ]+', "", p["title"]).strip() or "module"
-    return HTMLResponse(compose.embed_fonts(page), headers={"Content-Disposition": f'attachment; filename="{name}.html"', "Cache-Control": "no-store"})
+    return HTMLResponse(compose.embed_fonts(compose.refresh_player(page)), headers={"Content-Disposition": f'attachment; filename="{name}.html"', "Cache-Control": "no-store"})
 
 
 @app.post("/api/projects/import")
@@ -671,49 +671,71 @@ def import_module(file: UploadFile = File(...)):
     return {"project": p["id"], "title": m.title, "edited": data["edited"], "pronunciations_added": len(added)}
 
 
-narrations = {}                       # id -> {"status", "progress", "files", "times", "error"}
+narrations = {}                       # id -> progress of a voice being made (only while it is being made)
+NARRATION_VOICE, NARRATION_SPEED = "af_heart", 0.90
 
 
-@app.post("/api/projects/{pid}/narration")
-def make_narration(pid: str, v: int | None = None):
-    """Voice the module's sentences with the studio voice (cached), so the review player can play exactly what the video will sound like."""
+def narration_plan(pid, v):
+    """The sentences of a module version and where their voiced clips live. The addresses depend only on the module and the
+    glossary, never on a running job, so they stay valid when the Studio is restarted."""
     p = projects.get(pid)
     page = projects.version_html(pid, v or p["current"]) if p else None
     if page is None: raise HTTPException(404, "That module wasn't found.")
     scenes = cli.load_scenes(page)
+    pron = config.glossary().get("pronunciations", {})
+    cache = cli.CACHE / "tts"
+    files = [[cli.clip_path(c, NARRATION_VOICE, NARRATION_SPEED, cache, pron) for c in sc["chunks"]] for sc in scenes]
+    return scenes, pron, cache, files
+
+
+def narration_ready(pid, v, scenes, pron, cache, files):
+    if not all(f.exists() and f.with_suffix(".json").exists() for row in files for f in row): return None
+    q = f"?v={v}" if v else ""
+    return {"status": "done", "progress": 1.0, "label": "Ready", "error": "",
+            "urls": [[f"/api/projects/{pid}/narration/audio/{si}/{ci}{q}" for ci in range(len(row))] for si, row in enumerate(files)],
+            "times": cli.word_times(scenes, NARRATION_VOICE, NARRATION_SPEED, cache, pron)}
+
+
+@app.post("/api/projects/{pid}/narration")
+def make_narration(pid: str, v: int | None = None):
+    """Make sure the module's sentences are voiced with the studio voice, so the review player can play what the video will sound like.
+    Already voiced: the answer is immediate ("ready"). Otherwise a job reports honest progress."""
+    scenes, pron, cache, files = narration_plan(pid, v)
+    ready = narration_ready(pid, v, scenes, pron, cache, files)
+    if ready: return {"id": None, "ready": ready}
     jid = uuid.uuid4().hex[:10]
-    job = narrations[jid] = {"id": jid, "status": "running", "progress": 0.0, "files": None, "times": None, "error": ""}
+    total = cli.pending(scenes, NARRATION_VOICE, NARRATION_SPEED, cache, pron, timings=True)
+    job = narrations[jid] = {"status": "running", "progress": 0.0, "label": "Starting…", "error": "", "done": 0, "total": total}
 
     def work():
         try:
-            voice, speed, pron = "af_heart", 0.90, config.glossary().get("pronunciations", {})
-            cache = cli.CACHE / "tts"
-            cli.synthesize(scenes, voice, speed, cache, progress=lambda f: job.update(progress=round(f, 3)), pronounce=pron, timings=True)
-            job["files"] = [[cache / f"{voice}_{speed}_{__import__('hashlib').sha1(cli.spoken(c, pron).encode()).hexdigest()[:12]}.wav" for c in sc["chunks"]] for sc in scenes]
-            job["times"] = cli.word_times(scenes, voice, speed, cache, pron)
-            job.update(status="done", progress=1.0)
+            def status(what):
+                job["label"] = ("Waiting for another voice job to finish (a video may be rendering)…" if what == "waiting"
+                                else "Loading the voice…")
+            def progress(f):
+                done = min(total, int(round(f * total)))
+                job.update(progress=round(f, 3), done=done, label=f"Making the voice: sentence {min(total, done + 1)} of {total}")
+            cli.synthesize(scenes, NARRATION_VOICE, NARRATION_SPEED, cache, progress=progress, pronounce=pron, timings=True, status=status)
+            job.update(narration_ready(pid, v, scenes, pron, cache, files) or {"status": "failed", "error": "The voice files could not be found afterwards."})
         except Exception as e:  # noqa: BLE001
             job.update(status="failed", error=f"The studio voice couldn't be prepared ({type(e).__name__}: {e}).")
     threading.Thread(target=work, daemon=True).start()
-    return {"id": jid}
+    return {"id": jid, "ready": None}
 
 
 @app.get("/api/narration/{jid}")
 def narration_status(jid: str):
     job = narrations.get(jid)
-    if not job: raise HTTPException(404)
-    out = {"status": job["status"], "progress": job["progress"], "error": job["error"]}
-    if job["status"] == "done":
-        out["urls"] = [[f"/api/narration/{jid}/audio/{si}/{ci}" for ci in range(len(row))] for si, row in enumerate(job["files"])]
-        out["times"] = job["times"]
-    return out
+    if not job: raise HTTPException(404, "That voice job is no longer running. Press Studio voice again.")
+    return dict(job)
 
 
-@app.get("/api/narration/{jid}/audio/{si}/{ci}")
-def narration_audio(jid: str, si: int, ci: int):
-    job = narrations.get(jid)
-    try: path = job["files"][si][ci]
-    except (TypeError, KeyError, IndexError): raise HTTPException(404)
+@app.get("/api/projects/{pid}/narration/audio/{si}/{ci}")
+def narration_audio(pid: str, si: int, ci: int, v: int | None = None):
+    _, _, _, files = narration_plan(pid, v)
+    try: path = files[si][ci]
+    except IndexError: raise HTTPException(404)
+    if not path.exists(): raise HTTPException(404, "That sentence hasn't been voiced yet.")
     return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "max-age=3600"})
 
 

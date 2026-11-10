@@ -19,6 +19,14 @@ All notable changes to this project are documented here. The format follows
   flagged). Pronunciations in the file are added to your list if you don't have them yet.
 
 ### Fixed
+- **Studio voice could stop with no explanation.** Found by testing in the real Studio. After the Studio was restarted the player kept
+  "playing" in silence. Now the voice's addresses survive a restart and anything already voiced is ready instantly; a lost voice is
+  reported ("Reconnecting…") and retried for about 10 seconds before falling back, visibly, to your browser's voice; a browser that
+  blocks sound pauses with a message; a sound that never starts is not waited for; the next sentence is fetched while the current one
+  plays; and preparing shows real progress (loading, waiting for another voice job, sentence 12 of 39), can be cancelled, and switches at
+  the next sentence instead of restarting the current one.
+- Modules designed before this update had the old player (no full screen or voices). Every module is now served and downloaded with the
+  current player, without touching its slides, and a refresh never makes a file look edited.
 - The video renderer now handles looping animations: they run on absolute time, so every parallel render worker agrees on where
   they are and a 1-worker and a 4-worker render match.
 

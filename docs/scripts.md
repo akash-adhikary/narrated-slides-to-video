@@ -160,7 +160,8 @@ The review player is part of the module file itself, so it behaves the same in t
 - **Play** narrates with your browser's own text-to-speech voice, one sentence at a time. Choose the voice and speed (0.75× to 1.5×).
   Things appear on the words that name them. This is a *preview*: the video uses the studio voice, so timing differs slightly.
 - **Studio voice** (in the Studio only) plays the same voice the video will use, with its real word timings. The first time takes
-  a little while to prepare; after that it's instant.
+  a little while to prepare, with progress shown; after that it's instant, even after the Studio is restarted. If it's interrupted,
+  the player says so, reconnects and carries on from the same sentence.
 - **Full screen** (⤢, or press F; Esc to leave) hides the controls when you stop moving the mouse. **Open large** opens the player in
   its own browser tab. **CC** shows captions. Space plays and pauses, the arrow keys step, and you can click the progress bar to jump.
 

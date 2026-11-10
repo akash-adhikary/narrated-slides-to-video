@@ -1,3 +1,5 @@
+import pytest
+import pathlib
 from html2mp4 import compose, config
 from html2mp4.cli import load_scenes
 from html2mp4.script import EXAMPLE, parse
@@ -83,3 +85,36 @@ def test_the_players_own_elements_do_not_collide_with_the_motion_kit():
     page = compose.basic_module(parse("Title: T\n## One\nShow: A\nSay: First."), brand())
     bar = page[page.index('<div id="bar">'):page.index('<script type="application/json" id="html2mp4-source">')]
     assert 'class="count"' not in bar and 'class="pos"' in bar
+
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+def test_refresh_player_leaves_a_current_module_alone():
+    m = parse("Title: T\n## One\nShow: A\nSay: First.")
+    page = compose.basic_module(m, brand(), script_text="Title: T\n## One\nShow: A\nSay: First.")
+    assert compose.refresh_player(page) == page
+
+
+@pytest.mark.parametrize("fixture", ["module_player_v1.html", "module_player_v2.html"])
+def test_refresh_player_upgrades_older_modules_without_touching_the_slides(fixture):
+    from html2mp4.cli import load_scenes
+    old = (FIXTURES / fixture).read_text()
+    new = compose.refresh_player(old)
+    for ident in ('id="fs"', 'id="studiovoice"', 'id="notice"', "speechSynthesis", "h2m:player-js"):
+        assert ident in new
+    assert new.count('id="bar"') == 1 and new.count('id="capbox"') == 1 and new.count("var flat = []") == 1     # replaced, not added
+    assert new.count('<section class="slide') == old.count('<section class="slide') and load_scenes(new) == load_scenes(old)
+    assert compose.refresh_player(new) == new                                                                   # and again changes nothing
+
+
+def test_a_refreshed_module_still_counts_as_unedited_and_a_changed_one_does_not():
+    old = (FIXTURES / "module_player_v2.html").read_text()
+    assert compose.read_project(old)["edited"] is False
+    assert compose.read_project(compose.refresh_player(old))["edited"] is False                                 # bringing the player up to date isn't an edit
+    assert compose.read_project(compose.refresh_player(old.replace("Welcome", "Hello", 1)))["edited"] is True
+
+
+def test_refresh_player_ignores_files_it_did_not_make():
+    foreign = "<html><body><div id='bar'>mine</div><script>var flat = [];</script></body></html>"
+    assert compose.refresh_player(foreign) == foreign

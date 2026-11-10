@@ -69,6 +69,18 @@ Studio) plays the voice the video uses.
 **Studio voice isn't there.** It only appears when the module is open inside the Studio, because the Studio makes the voice. In a
 downloaded file the browser voice is used.
 
+**Studio voice says "Preparing…" for a long time.** The first time for a script, every sentence has to be voiced: about 2 seconds
+per sentence, after 10 seconds to load the voice. The button counts them ("Preparing 12/39") and a message under the video says what
+is happening. Voices are made one at a time, so if a video or another preview is being made the message says it is waiting for that
+to finish. Click the button again to cancel. While it prepares, Play keeps going with your browser's voice and the studio voice takes
+over at the next sentence, never in the middle of one.
+
+**"The studio voice was interrupted. Reconnecting…"** The Studio stopped answering, usually because it was restarted. The player tries
+for about 10 seconds, then carries on from the same sentence. If it can't reconnect it says so and continues with your browser's voice;
+press **Studio voice** to try again.
+
+**"Your browser blocked the sound."** Some browsers refuse to start sound without a click on the page. Press Play.
+
 **Full screen doesn't work inside the page.** Use **Open large**, or press F in the larger tab.
 
 **I opened a file and it says it can't be edited.** Only modules made by the Studio carry their script and slide designs. Any

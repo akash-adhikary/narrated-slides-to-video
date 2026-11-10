@@ -207,6 +207,7 @@ MOTION_CSS = """
 """
 
 PLAYER_CSS = """
+/*h2m:player-css*/
 /* review player (hidden in the video) */
 #bar{position:fixed;left:0;right:0;bottom:0;height:70px;background:#0b0b0f;color:#e8e8ee;display:flex;align-items:center;gap:8px;padding:6px 14px 0;
   font:14px system-ui,-apple-system,sans-serif;border-top:1px solid #222;transition:transform .3s ease,opacity .3s ease}
@@ -235,6 +236,11 @@ body.full.idle #bar{transform:translateY(100%);opacity:0}
 body.full.idle{cursor:none}
 body.full #capbox{bottom:96px;font-size:24px}
 body.full.idle #capbox{bottom:28px}
+#notice{position:fixed;left:50%;transform:translateX(-50%);bottom:130px;max-width:86%;background:#2c2f6b;color:#fff;font:500 14px/1.4 system-ui,sans-serif;
+  padding:9px 16px;border-radius:10px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+#notice[hidden]{display:none}
+body.full #notice{bottom:110px}
+/*h2m:end*/
 """
 
 
@@ -272,11 +278,11 @@ def basic_slide(slide):
     return "basic", f'<h2 data-c="0">{esc(slide.title)}</h2>{body}'
 
 
-PLAYER_JS = r"""
+PLAYER_JS = r"""/*h2m:player-js*/
 (function(){
   var flat = [];
   scenes.forEach(function(s, si){ s.chunks.forEach(function(t, ci){ flat.push([si, ci, t]); }); });
-  var pos = 0, playing = false, token = 0, timers = [], rate = 1, mode = 'browser', audio = null, studio = null, cued = [];
+  var pos = 0, playing = false, token = 0, timers = [], rate = 1, mode = 'browser', audio = null, studio = null, cued = [], nextAudio = null, retries = 0;
   var $ = function(id){ return document.getElementById(id); };
   var stage = $('stage'), bar = $('bar'), cap = bar.querySelector('.cap'), count = bar.querySelector('.pos'), play = $('play'), capbox = $('capbox');
   var q = new URLSearchParams(location.search), STUDIO = q.get('studio'), VERSION = q.get('v');
@@ -290,8 +296,11 @@ PLAYER_JS = r"""
     for (var i = 0; i + cue.length <= w.length; i++) { var ok = true; for (var k = 0; k < cue.length; k++) if (w[i + k][0] !== cue[k]) { ok = false; break; } if (ok) return i; }
     return -1;
   }
+  var noticeEl = $('notice'), noticeTimer = null;
+  function notice(text, ms){ clearTimeout(noticeTimer); noticeEl.textContent = text || ''; noticeEl.hidden = !text; if (text && ms) noticeTimer = setTimeout(function(){ notice(''); }, ms); }
   function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
   function stopAudio(){ try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
+  function dropPreload(){ if (nextAudio) { nextAudio.onerror = null; nextAudio = null; } }
 
   // ---- what is on screen at a step. live = while narrating: cued things wait for their word; otherwise they use an estimate.
   function showStep(live){
@@ -338,18 +347,53 @@ PLAYER_JS = r"""
     u.onerror = function(ev){ if (token !== my || ev.error === 'interrupted' || ev.error === 'canceled') return; revealAll(); after(my); };
     speechSynthesis.cancel(); try { speechSynthesis.resume(); } catch (e) {} speechSynthesis.speak(u);
   }
+  function preload(){                              // fetch the next sentence while this one plays, so there is no wait between them
+    var n = flat[pos + 1]; if (!n || !studio) { dropPreload(); return; }
+    var url = studio.urls[n[0]][n[1]]; if (nextAudio && nextAudio._url === url) return;
+    var a = new Audio(url); a.preload = 'auto'; a._url = url; nextAudio = a;
+  }
   function playStudio(my){
-    var si = flat[pos][0], ci = flat[pos][1], words = (studio.times[si] || [])[ci] || [];
-    audio = new Audio(studio.urls[si][ci]); audio.playbackRate = rate; audio.preservesPitch = audio.webkitPreservesPitch = true;
+    var si = flat[pos][0], ci = flat[pos][1], url = studio.urls[si][ci], words = (studio.times[si] || [])[ci] || [];
+    if (nextAudio && nextAudio._url === url && !nextAudio.error) { audio = nextAudio; nextAudio = null; } else { dropPreload(); audio = new Audio(url); }
+    var a = audio, started = false, watchdog = null;
+    a.playbackRate = rate; a.preservesPitch = a.webkitPreservesPitch = true;
     cued.forEach(function(e){
       var cue = (e.getAttribute('data-cue') || '').split(/\s+/).map(norm).filter(Boolean), at = 0;
       for (var i = 0; i + cue.length <= words.length; i++) { var ok = true; for (var k = 0; k < cue.length; k++) if (words[i + k][0] !== cue[k]) { ok = false; break; } if (ok) { at = Math.max(0, words[i][1] - 0.08); break; } }
       e._at = at;
     });
-    audio.onended = function(){ if (token !== my) return; revealAll(); after(my); };
-    audio.onerror = function(){ if (token !== my) return; armEstimate(flat[pos][2], my, 1); timers.push(setTimeout(function(){ if (token === my) { revealAll(); after(my); } }, (flat[pos][2].split(/\s+/).length / 2.5 + 0.8) / rate * 1000)); };
-    audio.play().catch(function(){});
+    a.addEventListener('playing', function(){ started = true; retries = 0; clearTimeout(watchdog); });
+    a.onended = function(){ if (token !== my) return; revealAll(); after(my); };
+    a.onerror = function(){ if (token === my) studioFailed(my); };
+    watchdog = setTimeout(function(){ if (token === my && !started) studioFailed(my); }, window.__h2mWatchdogMs || 7000); timers.push(watchdog);   // never wait forever for a sound that isn't coming
+    var pr = a.play();
+    if (pr && pr.catch) pr.catch(function(err){
+      if (token !== my) return;
+      if (err && err.name === 'NotAllowedError') { pause(); notice('Your browser blocked the sound. Press Play to start it.', 7000); }
+      else if (!err || err.name !== 'AbortError') studioFailed(my);
+    });
+    preload();
     (function loop(){ if (token !== my) return; var t = audio ? audio.currentTime : 0; cued.slice().forEach(function(e){ if (t >= e._at) reveal(e); }); requestAnimationFrame(loop); })();
+  }
+  // The studio voice stopped working (for example the Studio restarted): say so, reconnect once, and carry on from this sentence.
+  function studioFailed(my){
+    if (token !== my) return;
+    token++; clearTimers(); stopAudio(); dropPreload();
+    if (retries >= 1) { retries = 0; giveUp(); return; }
+    retries++; studio = null; reconnect(0);
+  }
+  // A restart of the Studio takes a few seconds, so keep trying for a while before giving up on the studio voice.
+  function reconnect(n){
+    notice('The studio voice was interrupted. Reconnecting' + (n ? ' (try ' + (n + 1) + ' of 5)' : '') + '…');
+    prepareStudio(true).then(function(){ if (playing) playStep(); }, function(e){
+      if (e && e.message === 'cancelled') { if (playing) playStep(); return; }
+      if (n >= 4) giveUp(); else setTimeout(function(){ reconnect(n + 1); }, 1800);
+    });
+  }
+  function giveUp(){
+    studio = null; setStudio(false);
+    notice("The studio voice isn't available right now, so your browser's voice is being used. Press Studio voice to try again.", 9000);
+    if (playing) playStep();
   }
   function playStep(){
     token++; var my = token; clearTimers(); stopAudio(); showStep(true);
@@ -391,23 +435,44 @@ PLAYER_JS = r"""
   if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; } else voiceSel.hidden = true;
 
   // ---- the studio voice (only when this page is open inside the Studio, which can make it)
-  var sv = $('studiovoice');
-  function setStudio(on, label){ mode = on ? 'studio' : 'browser'; sv.setAttribute('aria-pressed', on); sv.textContent = label || 'Studio voice'; voiceSel.disabled = on; }
+  var sv = $('studiovoice'), preparing = null, cancelPrep = null, base = STUDIO ? '/api/projects/' + encodeURIComponent(STUDIO) : '';
+  function setStudio(on, label){ mode = on ? 'studio' : 'browser'; sv.setAttribute('aria-pressed', on); sv.textContent = label || 'Studio voice'; voiceSel.disabled = on; if (!on) dropPreload(); }
+  function showPrep(s){ sv.textContent = s.total ? 'Preparing ' + s.done + '/' + s.total : 'Preparing…'; notice(s.label + (playing && mode !== 'studio' ? ' Meanwhile your browser voice is playing.' : '')); }
+  function prepareStudio(quiet){
+    if (preparing) return preparing;
+    var cancelled = false, timer = null; sv.textContent = 'Preparing…';
+    preparing = new Promise(function(resolve, reject){
+      cancelPrep = function(){ cancelled = true; clearTimeout(timer); reject(new Error('cancelled')); };
+      var json = function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.detail || 'failed'); return j; }); };
+      function finish(s){ studio = s; resolve(); }
+      function poll(id){
+        if (cancelled) return;
+        fetch('/api/narration/' + id).then(json).then(function(s){
+          if (cancelled) return;
+          if (s.status === 'failed') throw new Error(s.error || 'failed');
+          if (s.status === 'done') return finish(s);
+          showPrep(s); timer = setTimeout(function(){ poll(id); }, 600);
+        }).catch(function(e){ if (!cancelled) reject(e); });
+      }
+      fetch(base + '/narration' + (VERSION ? '?v=' + encodeURIComponent(VERSION) : ''), {method: 'POST'}).then(json).then(function(j){
+        if (cancelled) return;
+        if (j.ready) finish(j.ready); else poll(j.id);
+      }).catch(function(e){ if (!cancelled) reject(e); });
+    }).then(function(){ preparing = null; cancelPrep = null; setStudio(true); notice(''); },
+            function(e){
+              preparing = null; cancelPrep = null; var byUser = e && e.message === 'cancelled';
+              if (!quiet || byUser) setStudio(false);                                  // while reconnecting, keep the studio voice selected until we give up
+              if (byUser) notice(''); else if (!quiet) notice('The studio voice could not be prepared: ' + (e && e.message || e), 9000);
+              throw e; });
+    return preparing;
+  }
   if (STUDIO) {
     sv.hidden = false; sv.title = 'Hear the same voice the video will use';
     sv.onclick = function(){
-      if (mode === 'studio') { setStudio(false); if (playing) playStep(); return; }
-      if (studio) { setStudio(true); if (playing) playStep(); return; }
-      sv.disabled = true; sv.textContent = 'Preparing…';
-      fetch('/api/projects/' + encodeURIComponent(STUDIO) + '/narration' + (VERSION ? '?v=' + encodeURIComponent(VERSION) : ''), {method: 'POST'}).then(function(r){ return r.json(); }).then(function(j){
-        if (!j.id) throw new Error(j.detail || 'failed');
-        (function poll(){ fetch('/api/narration/' + j.id).then(function(r){ return r.json(); }).then(function(s){
-          if (s.status === 'failed') throw new Error(s.error || 'failed');
-          if (s.status !== 'done') { sv.textContent = 'Preparing ' + Math.round(s.progress * 100) + '%'; setTimeout(poll, 700); return; }
-          studio = s; sv.disabled = false; setStudio(true, 'Studio voice'); if (playing) playStep();
-        }).catch(fail); })();
-      }).catch(fail);
-      function fail(e){ sv.disabled = false; setStudio(false); sv.textContent = 'Studio voice'; alert('The studio voice could not be prepared: ' + (e.message || e)); }
+      if (preparing) { cancelPrep(); return; }                                        // click again while preparing to cancel
+      if (mode === 'studio') { setStudio(false); notice('Using your browser voice' + (playing ? ' from the next sentence.' : '.'), 3000); return; }
+      if (studio) { setStudio(true); notice('Studio voice' + (playing ? ' from the next sentence.' : ' on.'), 3000); return; }
+      prepareStudio().catch(function(){});                                           // a playing narration keeps going and switches at the next sentence
     };
   }
 
@@ -442,18 +507,65 @@ PLAYER_JS = r"""
   }
   addEventListener('resize', fit); fit(); showStep(false);
 })();
+/*h2m:end*/
 """.replace("__W__", str(STAGE_W)).replace("__H__", str(STAGE_H))
 
+
+PLAYER_BAR_HTML = """<!--h2m:bar--><div id="capbox" hidden></div><div id="notice" role="status" hidden></div>
+<div id="bar">
+<div id="seek" role="presentation" title="Click to jump"><div class="rail"></div><div class="fill" id="seekfill"></div></div>
+<button id="prev" aria-label="Previous step" title="Previous (←)">‹</button><button id="play" title="Play or pause (space)">Play</button><button id="next" aria-label="Next step" title="Next (→)">›</button>
+<span class="cap"></span>
+<select id="speed" aria-label="Speed" title="Speaking speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
+<select id="voice" aria-label="Voice" title="Your browser's voice (a preview)" hidden></select>
+<button id="studiovoice" hidden aria-pressed="false">Studio voice</button>
+<button id="cc" aria-pressed="false" title="Captions (C)">CC</button>
+<button id="fs" aria-label="Full screen" title="Full screen (F)">⤢</button>
+<span class="pos"></span></div><!--/h2m:bar-->"""
 
 PROJECT_RE = re.compile(r'(<script type="application/json" id="html2mp4-project">)(.*?)(</script>)', re.S)
 FONTS_RE = re.compile(r'<style id="html2mp4-fonts">.*?</style>\n?|<link[^>]*fonts\.(?:googleapis|gstatic)\.com[^>]*>\n?', re.S)
 
 
+PLAYER_PARTS = (re.compile(r"<!--h2m:bar-->.*?<!--/h2m:bar-->\n?", re.S), re.compile(r"/\*h2m:player-css\*/.*?/\*h2m:end\*/", re.S),
+                re.compile(r"/\*h2m:player-js\*/.*?/\*h2m:end\*/", re.S))
+
+
 def fingerprint(page):
-    """A hash of the page without its project block or its font links, so a file can tell whether it was edited after the Studio made it
-    (and still match after the fonts were embedded for download)."""
+    """A hash of the page without its project block, its font links or its player, so a file can tell whether it was edited after the
+    Studio made it (and still match after fonts are embedded for download or the player is brought up to date)."""
     import hashlib
-    return hashlib.sha256(FONTS_RE.sub("", PROJECT_RE.sub(r"\1\3", page)).encode()).hexdigest()
+    page = FONTS_RE.sub("", PROJECT_RE.sub(r"\1\3", page))
+    for part in PLAYER_PARTS: page = part.sub("", page)
+    return hashlib.sha256(page.encode()).hexdigest()
+
+
+def _marked(text, start, end="/*h2m:end*/"): return text[text.index(start): text.index(end) + len(end)]
+
+
+def refresh_player(page):
+    """Bring a module made by the Studio up to the current player (full screen, voices, fixes). Only the player is replaced: the slides are
+    untouched, and a file that isn't one of ours is returned as it is. Older modules are recognised by their layout."""
+    if 'name="generator" content="html2mp4' not in page: return page
+    clean = (read_project(page) or {}).get("edited") is False
+    css, js = _marked(PLAYER_CSS, "/*h2m:player-css*/"), _marked(PLAYER_JS, "/*h2m:player-js*/")
+    out = page
+    if "<!--h2m:bar-->" in out:
+        out = PLAYER_PARTS[0].sub(lambda m: PLAYER_BAR_HTML + "\n", out, count=1)
+        out = PLAYER_PARTS[1].sub(lambda m: css, out, count=1)
+        out = PLAYER_PARTS[2].sub(lambda m: js, out, count=1)
+    else:                                                                            # made before the player had markers
+        out = out.replace('<div id="capbox" hidden></div>\n', "")
+        out = re.sub(r'<div id="bar">.*?<span class="(?:count|pos)"></span></div>', lambda m: PLAYER_BAR_HTML, out, count=1, flags=re.S)
+        out, n = re.subn(r"/\* review player \(hidden in the video\) \*/.*?body\.full\.idle #capbox\{[^}]*\}\n?", lambda m: css + "\n", out, count=1, flags=re.S)
+        if not n: out = re.sub(r"/\* review player \(hidden in the video\) \*/.*?#bar \.count\{[^}]*\}\n?", lambda m: css + "\n", out, count=1, flags=re.S)
+        out = re.sub(r"\(function\(\)\{\n  var flat = \[\];.*\}\)\(\);\n", lambda m: js + "\n", out, count=1, flags=re.S)
+        out = out.replace("#frame{position:fixed;inset:0 0 64px 0;", "#frame{position:fixed;inset:0 0 70px 0;")
+    if clean and out != page and PROJECT_RE.search(out):                              # a file the Studio wrote and nobody changed stays "unedited"
+        data = json.loads(PROJECT_RE.search(out).group(2)); data["fingerprint"] = fingerprint(out)
+        enc = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+        out = PROJECT_RE.sub(lambda m: m.group(1) + enc + m.group(3), out, count=1)
+    return out
 
 
 def read_project(page):
@@ -503,17 +615,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
 <div id="frame"><div id="stage">
 {chr(10).join(sections)}
 </div></div>
-<div id="capbox" hidden></div>
-<div id="bar">
-<div id="seek" role="presentation" title="Click to jump"><div class="rail"></div><div class="fill" id="seekfill"></div></div>
-<button id="prev" aria-label="Previous step" title="Previous (←)">‹</button><button id="play" title="Play or pause (space)">Play</button><button id="next" aria-label="Next step" title="Next (→)">›</button>
-<span class="cap"></span>
-<select id="speed" aria-label="Speed" title="Speaking speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
-<select id="voice" aria-label="Voice" title="Your browser's voice (a preview)" hidden></select>
-<button id="studiovoice" hidden aria-pressed="false">Studio voice</button>
-<button id="cc" aria-pressed="false" title="Captions (C)">CC</button>
-<button id="fs" aria-label="Full screen" title="Full screen (F)">⤢</button>
-<span class="pos"></span></div>
+{PLAYER_BAR_HTML}
 <script type="application/json" id="html2mp4-source">{source}</script>
 <script type="application/json" id="html2mp4-project"></script>
 <script>

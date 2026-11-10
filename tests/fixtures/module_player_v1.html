@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="html2mp4 0.3.0">
+<title>Giving Feedback That Lands</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+
+:root{
+  --bg:#0f1222; --text:#f4f5fa; --accent:#7c83ff; --accent2:#3dd6c6;
+  --muted:color-mix(in srgb, var(--text) 64%, var(--bg)); --faint:color-mix(in srgb, var(--text) 38%, var(--bg));
+  --surface:color-mix(in srgb, var(--text) 6%, var(--bg)); --surface2:color-mix(in srgb, var(--text) 10%, var(--bg));
+  --line:color-mix(in srgb, var(--text) 16%, var(--bg)); --accent-soft:color-mix(in srgb, var(--accent) 18%, var(--bg));
+  --hfont:"Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bfont:"Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fs-display:96px;--fs-title:64px;--fs-heading:44px;--fs-lead:28px;--fs-body:22px;--fs-small:16px;
+  
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;overflow:hidden}
+#frame{position:fixed;inset:0 0 64px 0;display:flex;align-items:center;justify-content:center}
+#stage{width:1280px;height:720px;flex:none;position:relative;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:var(--bfont);transform-origin:center center}
+.slide{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .6s ease}
+.slide.active{opacity:1;visibility:visible}
+.slide-body{position:absolute;left:80px;right:80px;top:64px;bottom:96px}
+[data-c]{opacity:0;transform:translateY(12px);transition:opacity .7s ease var(--d,0s), transform .7s cubic-bezier(.2,.7,.2,1) var(--d,0s)}
+[data-c].on{opacity:1;transform:none}
+h1,h2,h3{font-family:var(--hfont);font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.slide-foot{position:absolute;left:80px;right:80px;bottom:30px;height:32px;display:flex;align-items:center;justify-content:space-between;
+  font:500 13px var(--bfont);color:var(--faint);letter-spacing:.02em}
+.slide-foot img{height:32px;width:auto;display:block}
+.dots{display:flex;gap:6px} .dots i{width:6px;height:6px;border-radius:50%;background:var(--line)} .dots i.on{background:var(--accent)}
+
+/* design kit: building blocks for slide designs (all sizes come from the type scale) */
+.t-display{font:500 var(--fs-display)/1 var(--hfont);letter-spacing:-.03em}
+.t-title{font:600 var(--fs-title)/1.08 var(--hfont);letter-spacing:-.025em}
+.t-heading{font:600 var(--fs-heading)/1.12 var(--hfont);letter-spacing:-.02em}
+.t-lead{font:500 var(--fs-lead)/1.25 var(--hfont);letter-spacing:-.01em}
+.t-body{font:400 var(--fs-body)/1.4 var(--bfont)}
+.t-small{font:500 var(--fs-small)/1.3 var(--bfont)}
+.t-eyebrow{font:600 var(--fs-small)/1.2 var(--bfont);letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+.t-muted{color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:24px}
+.row{display:flex;gap:24px;align-items:stretch}
+.row > *{flex:1;min-width:0}
+.grid{display:grid;gap:24px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:28px}
+.pill{display:inline-block;padding:6px 16px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font:600 var(--fs-small)/1.2 var(--bfont)}
+
+/* title slide */
+.title-slide .slide-body{display:flex;flex-direction:column;justify-content:center}
+.title-slide .eyebrow{font:600 var(--fs-small) var(--bfont);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:22px}
+.title-slide h1{font-size:var(--fs-title);max-width:960px}
+.title-slide .rule{width:120px;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));margin-top:34px}
+.title-slide .glow{position:absolute;right:-160px;top:-160px;width:620px;height:620px;border-radius:50%;
+  background:radial-gradient(circle,var(--accent-soft),transparent 68%)}
+
+/* basic layout */
+.basic h2{font-size:var(--fs-heading);max-width:1000px}
+.basic h2::before{content:"";display:block;width:56px;height:4px;border-radius:2px;background:var(--accent);margin-bottom:26px}
+.basic .slide-body{display:flex;flex-direction:column}
+.basic .cards{margin:auto 0;display:grid;gap:22px}
+.basic .cards.n1{grid-template-columns:1fr} .basic .cards.n2{grid-template-columns:repeat(2,1fr)}
+.basic .cards.n3,.basic .cards.n5,.basic .cards.n6{grid-template-columns:repeat(3,1fr)} .basic .cards.n4{grid-template-columns:repeat(2,1fr)}
+.basic .card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:32px 32px;min-height:196px;display:flex;flex-direction:column;justify-content:space-between;gap:16px}
+.basic .card b{font:600 var(--fs-small) var(--bfont);color:var(--accent);letter-spacing:.08em}
+.basic .card span{font:500 var(--fs-lead)/1.25 var(--hfont);letter-spacing:-.015em}
+.basic .cards.n1 .card span{font-size:var(--fs-heading)}
+.basic .list{margin:auto 0;columns:2;column-gap:56px;list-style:none}
+.basic .list li{break-inside:avoid;font:500 var(--fs-body)/1.35 var(--bfont);padding:14px 0 14px 34px;position:relative;border-top:1px solid var(--line)}
+.basic .list li::before{content:"";position:absolute;left:0;top:25px;width:12px;height:12px;border-radius:3px;background:var(--accent)}
+.basic.statement .slide-body{display:flex;align-items:center}
+.basic.statement h2{font-size:var(--fs-title);max-width:980px}
+
+/* review player (hidden in the video) */
+#bar{position:fixed;left:0;right:0;bottom:0;height:64px;background:#0b0b0f;color:#e8e8ee;display:flex;align-items:center;gap:12px;padding:0 16px;
+  font:14px system-ui,-apple-system,sans-serif;border-top:1px solid #222}
+#bar button{background:#1b1b22;color:inherit;border:1px solid #2c2c36;border-radius:8px;height:36px;min-width:36px;padding:0 12px;cursor:pointer;font:inherit}
+#bar button:hover{background:#26262f}
+#bar .cap{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#b9b9c6}
+#bar .count{font-variant-numeric:tabular-nums;color:#8a8a99}
+
+
+</style>
+</head>
+<body>
+<div id="frame"><div id="stage">
+<section class="slide title-slide" id="s0"><div class="glow"></div><div class="slide-body"><div class="eyebrow" data-c="0">Manager Essentials · Module 2</div><h1 data-c="0" data-d="0.2">Giving Feedback That Lands</h1><div class="rule" data-c="0" data-d="0.5"></div></div><div class="slide-foot"><span></span><div class="dots"></div><span></span></div></section>
+<section class="slide basic" id="s1"><div class="slide-body"><h2 data-c="0">Why feedback matters</h2><div class="cards n3"><div class="card" data-c="1" data-cue="Builds trust"><b>01</b><span>Builds trust</span></div><div class="card" data-c="1" data-cue="Speeds up growth"><b>02</b><span>Speeds up growth</span></div><div class="card" data-c="1" data-cue="Prevents surprises"><b>03</b><span>Prevents surprises</span></div></div></div><div class="slide-foot"><span></span><div class="dots"><i class="on"></i><i class=""></i><i class=""></i></div><span></span></div></section>
+<section class="slide basic" id="s2"><div class="slide-body"><h2 data-c="0">The SBI model</h2><div class="cards n3"><div class="card" data-c="0" data-cue="Situation"><b>01</b><span>Situation</span></div><div class="card" data-c="0" data-cue="Behavior"><b>02</b><span>Behavior</span></div><div class="card" data-c="0" data-cue="Impact"><b>03</b><span>Impact</span></div></div></div><div class="slide-foot"><span></span><div class="dots"><i class=""></i><i class="on"></i><i class=""></i></div><span></span></div></section>
+<section class="slide basic" id="s3"><div class="slide-body"><h2 data-c="0">Your next step</h2><div class="cards n1"><div class="card" data-c="0" data-cue="Pick one piece of feedback you&#x27;ve been holding back"><b>01</b><span>Pick one piece of feedback you&#x27;ve been holding back</span></div></div></div><div class="slide-foot"><span></span><div class="dots"><i class=""></i><i class=""></i><i class="on"></i></div><span></span></div></section>
+</div></div>
+<div id="bar"><button id="prev" aria-label="Previous">‹</button><button id="play">Play</button><button id="next" aria-label="Next">›</button>
+<span class="cap"></span><span class="count"></span></div>
+<script type="application/json" id="html2mp4-source">{"title": "Giving Feedback That Lands", "subtitle": "Manager Essentials · Module 2", "intro": ["Welcome to module two of Manager Essentials."], "slides": [{"title": "Why feedback matters", "say": ["Feedback is how good teams get better.", "Done well, it builds trust, speeds up growth, and prevents surprises at review time."], "show": ["Builds trust", "Speeds up growth", "Prevents surprises"], "note": "", "screen": "", "timing": ""}, {"title": "The SBI model", "say": ["A simple structure helps: situation, behavior, and impact.", "Describe when it happened, what the person did, and the effect it had."], "show": ["Situation", "Behavior", "Impact"], "note": "three steps, left to right", "screen": "", "timing": ""}, {"title": "Your next step", "say": ["Before your next one-to-one, pick one piece of feedback you've been holding back.", "Write it down using situation, behavior, and impact, and share it this week."], "show": ["Pick one piece of feedback you've been holding back"], "note": "", "screen": "", "timing": ""}]}</script>
+<script>
+var scenes = [
+  {id:'s0', chunks:["Welcome to module two of Manager Essentials."]},
+  {id:'s1', chunks:["Feedback is how good teams get better.", "Done well, it builds trust, speeds up growth, and prevents surprises at review time."]},
+  {id:'s2', chunks:["A simple structure helps: situation, behavior, and impact.", "Describe when it happened, what the person did, and the effect it had."]},
+  {id:'s3', chunks:["Before your next one-to-one, pick one piece of feedback you've been holding back.", "Write it down using situation, behavior, and impact, and share it this week."]}
+];
+
+(function(){
+  var flat = [];
+  scenes.forEach(function(s, si){ s.chunks.forEach(function(t, ci){ flat.push([si, ci, t]); }); });
+  var pos = 0, timer = null, stage = document.getElementById('stage');
+  var cap = document.querySelector('#bar .cap'), count = document.querySelector('#bar .count'), play = document.getElementById('play');
+  function norm(w){ return w.toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+  function cueDelay(e, text){            // estimate: ~0.4 s per word before the cued word (the video uses the voice's real timings)
+    var cue = (e.getAttribute('data-cue') || '').split(/\s+/).map(norm).filter(Boolean);
+    if (!cue.length) return 0;
+    var words = text.split(/\s+/).map(norm);
+    for (var i = 0; i + cue.length <= words.length; i++)
+      if (cue.every(function(c, k){ return words[i + k] === c; })) return Math.max(0, i * 0.4 - 0.08);
+    return 0;
+  }
+  function render(){
+    var si = flat[pos][0], ci = flat[pos][1];
+    scenes.forEach(function(s, i){
+      var el = document.getElementById(s.id); el.classList.toggle('active', i === si);
+      el.querySelectorAll('[data-c]').forEach(function(e){
+        var d = parseFloat(e.getAttribute('data-d') || 0);
+        if (e.hasAttribute('data-cue')) d += cueDelay(e, s.chunks[+e.dataset.c] || '');
+        if (d) e.style.setProperty('--d', d + 's');
+        e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci));
+      });
+    });
+    cap.textContent = flat[pos][2]; count.textContent = (pos + 1) + ' / ' + flat.length;
+    try { parent.postMessage({html2mp4: 'step', pos: pos, total: flat.length}, '*'); } catch (e) {}
+  }
+  function go(i){ pos = Math.max(0, Math.min(flat.length - 1, i)); render(); }
+  function stop(){ clearTimeout(timer); timer = null; play.textContent = 'Play'; }
+  function tick(){ if (pos >= flat.length - 1) { stop(); return; }
+    timer = setTimeout(function(){ go(pos + 1); tick(); }, (flat[pos][2].split(/\s+/).length / 2.5 + 0.8) * 1000); }
+  play.onclick = function(){ if (timer) stop(); else { play.textContent = 'Pause'; if (pos >= flat.length - 1) go(0); tick(); } };
+  document.getElementById('prev').onclick = function(){ stop(); go(pos - 1); };
+  document.getElementById('next').onclick = function(){ stop(); go(pos + 1); };
+  addEventListener('keydown', function(e){
+    if (e.key === 'ArrowRight') { stop(); go(pos + 1); } if (e.key === 'ArrowLeft') { stop(); go(pos - 1); }
+    if (e.code === 'Space') { e.preventDefault(); play.click(); } });
+  addEventListener('message', function(e){ if (e.data && e.data.html2mp4 === 'go') { stop(); go(e.data.pos); } });
+  function fit(){ stage.style.transform = 'scale(' + Math.min(innerWidth / 1280, (innerHeight - 64) / 720) + ')'; }
+  addEventListener('resize', fit); fit(); render();
+})();
+
+</script>
+</body>
+</html>

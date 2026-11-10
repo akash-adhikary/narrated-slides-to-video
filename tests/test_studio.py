@@ -181,25 +181,68 @@ def test_import_adds_only_missing_pronunciations(client):
 def compose_project(page): return studio.compose.read_project(page)
 
 
-def test_studio_voice_for_the_review_player(client, monkeypatch, tmp_path):
+def _fake_voice(monkeypatch, tmp_path, calls=None, slow=0.0):
     import numpy as np, soundfile as sf
-    pid = _designed_project(client)
     monkeypatch.setattr(studio.cli, "CACHE", tmp_path / "cache")
-    def fake_synth(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False):
+    def fake_synth(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False, status=None):
         cache.mkdir(parents=True, exist_ok=True)
-        for sc in scenes:
-            for c in sc["chunks"]:
-                sf.write(cache / f"{voice}_{speed}_{__import__('hashlib').sha1(studio.cli.spoken(c, pronounce).encode()).hexdigest()[:12]}.wav", np.zeros(2400, dtype="float32"), 24000)
-        progress(1.0)
+        if status: status("waiting"); time.sleep(slow); status("loading")
+        todo = [c for sc in scenes for c in sc["chunks"]]
+        for i, c in enumerate(todo):
+            progress(i / len(todo)); time.sleep(slow)
+            f = studio.cli.clip_path(c, voice, speed, cache, pronounce)
+            sf.write(f, np.zeros(2400, dtype="float32"), 24000); f.with_suffix(".json").write_text('[["hello", 0.1]]')
+        if calls is not None: calls.append(len(todo))
     monkeypatch.setattr(studio.cli, "synthesize", fake_synth)
-    monkeypatch.setattr(studio.cli, "word_times", lambda scenes, voice, speed, cache, pron=None: [[[("hello", 0.1)] for _ in sc["chunks"]] for sc in scenes])
-    job = client.post(f"/api/projects/{pid}/narration").json()
-    end = time.time() + 20
+
+
+def _poll(client, jid, labels=None, seconds=20):
+    end = time.time() + seconds
     while time.time() < end:
-        st = client.get(f"/api/narration/{job['id']}").json()
-        if st["status"] != "running": break
-        time.sleep(0.2)
+        st = client.get(f"/api/narration/{jid}").json()
+        if labels is not None: labels.append(st["label"])
+        if st["status"] != "running": return st
+        time.sleep(0.02)
+    raise AssertionError("voice job did not finish")
+
+
+def test_studio_voice_reports_honest_progress_then_serves_stateless_audio(client, monkeypatch, tmp_path):
+    pid = _designed_project(client)
+    _fake_voice(monkeypatch, tmp_path, slow=0.03)
+    start = client.post(f"/api/projects/{pid}/narration").json()
+    assert start["ready"] is None and start["id"]
+    labels = []; st = _poll(client, start["id"], labels)
     assert st["status"] == "done" and st["times"][0][0] == [["hello", 0.1]]
+    assert any("Waiting for another voice job" in l for l in labels) and any(l.startswith("Making the voice: sentence") for l in labels)
+    assert st["total"] == st["done"] or st["done"] >= st["total"] - 1
     audio = client.get(st["urls"][0][0])
     assert audio.status_code == 200 and audio.headers["content-type"] == "audio/wav" and len(audio.content) > 2000
-    assert client.get(f"/api/narration/{job['id']}/audio/9/9").status_code == 404
+    assert client.get(f"/api/projects/{pid}/narration/audio/9/9").status_code == 404
+
+
+def test_audio_addresses_survive_a_studio_restart_and_cached_voice_is_instant(client, monkeypatch, tmp_path):
+    pid = _designed_project(client)
+    made = []; _fake_voice(monkeypatch, tmp_path, calls=made)
+    st = _poll(client, client.post(f"/api/projects/{pid}/narration").json()["id"])
+    studio.narrations.clear()                                                   # what a restart does: every running job is forgotten
+    assert client.get(st["urls"][1][0]).status_code == 200                     # the audio address still works
+    again = client.post(f"/api/projects/{pid}/narration").json()
+    assert again["id"] is None and again["ready"]["status"] == "done" and len(made) == 1       # nothing was made twice
+    stale = client.get("/api/narration/gone")
+    assert stale.status_code == 404 and "Press Studio voice again" in stale.json()["detail"]
+
+
+def test_an_unvoiced_sentence_is_not_found_rather_than_an_error(client, monkeypatch, tmp_path):
+    pid = _designed_project(client)
+    monkeypatch.setattr(studio.cli, "CACHE", tmp_path / "empty-cache")
+    r = client.get(f"/api/projects/{pid}/narration/audio/0/0")
+    assert r.status_code == 404 and "hasn't been voiced" in r.json()["detail"]
+
+
+def test_old_modules_are_served_with_the_current_player(client):
+    pid = _designed_project(client)
+    old = (__import__("pathlib").Path(__file__).parent / "fixtures" / "module_player_v1.html").read_text()
+    (projects.folder(pid) / "versions" / "v1.html").write_text(old, encoding="utf-8")
+    served = client.get(f"/api/projects/{pid}/module.html").text
+    assert 'id="studiovoice"' in served and "h2m:player-js" in served and served.count('id="bar"') == 1
+    assert 'id="studiovoice"' in client.get(f"/api/projects/{pid}/download").text

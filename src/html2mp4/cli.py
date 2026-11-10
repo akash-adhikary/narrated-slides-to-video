@@ -69,7 +69,7 @@ SETTLE_HOLD  = 0.6                      # fully built slide stays up this long b
 END_HOLD     = 1.6                      # hold on the last frame
 FADE_OUT     = 0.8                      # sound fades at the very end (the picture holds the last slide, as the page does)
 
-PAGE_CSS = "#bar,#start,#capbox{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
+PAGE_CSS = "#bar,#start,#capbox,#notice{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
 
 PAGE_JS = """
 (ids) => {
@@ -200,16 +200,30 @@ def spoken(text, pronounce=None):
 def _norm_word(w): return re.sub(r"[^a-z0-9]+", "", w.lower())
 
 
-def synthesize(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False):
-    """Voice every sentence (cached). With timings=True, also make sure each clip has its word-timing file."""
+def clip_path(text, voice, speed, cache, pronounce=None):
+    """Where the voiced clip of one sentence is kept (the same sentence, voice and pronunciations always map to the same file)."""
+    return cache / f"{voice}_{speed}_{hashlib.sha1(spoken(text, pronounce).encode()).hexdigest()[:12]}.wav"
+
+
+def pending(scenes, voice, speed, cache, pronounce=None, timings=False):
+    """How many different sentences still need voicing (or their word timings)."""
+    need = lambda c: not clip_path(c, voice, speed, cache, pronounce).exists() or (timings and not clip_path(c, voice, speed, cache, pronounce).with_suffix(".json").exists())
+    return len(dict.fromkeys(c for sc in scenes for c in sc["chunks"] if need(c)))
+
+
+def synthesize(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False, status=None):
+    """Voice every sentence (cached). With timings=True, also make sure each clip has its word-timing file.
+    `status("waiting")` is called if another synthesis holds the voice, then `status("loading")` once this one starts."""
     cache.mkdir(parents=True, exist_ok=True)
-    key = lambda text: cache / f"{voice}_{speed}_{hashlib.sha1(spoken(text, pronounce).encode()).hexdigest()[:12]}.wav"
+    key = lambda text: clip_path(text, voice, speed, cache, pronounce)
     need = lambda c: not key(c).exists() or (timings and not key(c).with_suffix(".json").exists())
     todo = list(dict.fromkeys(c for sc in scenes for c in sc["chunks"] if need(c)))
     if todo:
         log(f"narrating {len(todo)} sentence(s) with Kokoro voice '{voice}' at {speed}x")
         import warnings; warnings.filterwarnings("ignore")
+        if status and _TTS_LOCK.locked(): status("waiting")
         with _TTS_LOCK:
+            if status: status("loading")
             _synthesize_todo(todo, voice, speed, key, progress, lambda t: spoken(t, pronounce), need)
     return [[sf.read(key(c), dtype="float32")[0] for c in sc["chunks"]] for sc in scenes]
 
@@ -220,7 +234,7 @@ def word_times(scenes, voice, speed, cache, pronounce=None):
     for sc in scenes:
         row = []
         for c in sc["chunks"]:
-            f = (cache / f"{voice}_{speed}_{hashlib.sha1(spoken(c, pronounce).encode()).hexdigest()[:12]}.json")
+            f = clip_path(c, voice, speed, cache, pronounce).with_suffix(".json")
             row.append([tuple(x) for x in json.loads(f.read_text())] if f.exists() else [])
         out.append(row)
     return out
