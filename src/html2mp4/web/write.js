@@ -94,7 +94,7 @@ function renderSuggestions(list){
 /* ---------- designing ---------- */
 async function startJob(promise){
   W.busy = true; updateButtons();
-  try{ const r = await promise; if(r.job){ trackJob(r.job, r.project); } else { W.busy = false; updateButtons(); toast("Nothing has changed"); } return r; }
+  try{ const r = await promise; if(r.job){ if(r.project && r.project !== W.project) W.adopt = r.project; trackJob(r.job, r.project); } else { W.busy = false; updateButtons(); toast("Nothing has changed"); } return r; }
   catch(err){ W.busy = false; updateButtons(); toast(err.message); }
 }
 $("#wDesign").addEventListener("click", () => {
@@ -121,9 +121,9 @@ function renderActivity(list){
   if(atEnd) box.scrollTop = box.scrollHeight;
 }
 
-function trackJob(job, project){
+function trackJob(job, project, quiet){
   $("#cardJob").hidden = false; W.busy = true; updateButtons();
-  $("#cardJob").scrollIntoView({behavior: "smooth", block: "center"});
+  if(!quiet) $("#cardJob").scrollIntoView({behavior: "smooth", block: "center"});
   clearInterval(W.jobTimer);
   const tick = async () => {
     const j = await api(`/api/write/jobs/${job.id}`).catch(() => null); if(!j) return;

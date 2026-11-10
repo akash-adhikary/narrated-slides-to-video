@@ -1,3 +1,4 @@
+import re
 import time
 import pytest
 from fastapi.testclient import TestClient
@@ -246,3 +247,58 @@ def test_old_modules_are_served_with_the_current_player(client):
     served = client.get(f"/api/projects/{pid}/module.html").text
     assert 'id="studiovoice"' in served and "h2m:player-js" in served and served.count('id="bar"') == 1
     assert 'id="studiovoice"' in client.get(f"/api/projects/{pid}/download").text
+
+
+def test_inserting_or_removing_a_slide_keeps_the_designs_of_the_others():
+    base = script.EXAMPLE
+    mid = base.replace("## The SBI model", "## A new idea\nSay: Something new.\n\n## The SBI model")
+    remap, changed = studio.align_slides(base, mid)
+    assert changed == ["s2"] and remap == {"s1": "s1", "s3": "s2", "s4": "s3"}
+    assert studio.changed_slides(base, mid) == ["s2"]
+    remap, changed = studio.align_slides(mid, base)                                  # and removing it again
+    assert changed == [] and remap == {"s1": "s1", "s2": "s3", "s3": "s4"}
+    remap, changed = studio.align_slides(base, base.replace("Feedback is how good teams get better.", "Feedback helps teams grow."))
+    assert changed == ["s1"] and remap["s1"] == "s1"                                  # an edited slide starts from its old design
+
+
+def test_a_moved_design_follows_its_slide_id():
+    d = {"layout": "cards", "summary": "x", "html": '<svg><defs><linearGradient id="s3-g"/></defs><path fill="url(#s3-g)"/></svg><div class="s3-box"><i class="x s3-vs"></i></div><p>s3 buckets</p>', "css": "#s3 .a{color:red}\n#s3 .s3-box{margin:0}\n#s3-g{opacity:1}"}
+    moved = studio.remap_design(d, "s3", "s5")
+    assert moved["css"] == "#s5 .a{color:red}\n#s5 .s3-box{margin:0}\n#s5-g{opacity:1}" and 'id="s5-g"' in moved["html"] and "url(#s5-g)" in moved["html"]
+    assert 'class="s3-box"' in moved["html"] and 'class="x s3-vs"' in moved["html"] and "<p>s3 buckets</p>" in moved["html"]      # class names stay as they are
+    assert moved["layout"] == "cards" and studio.remap_design(d, "s3", "s3") == d
+
+
+def test_apply_runs_one_design_for_a_script_edit_and_visual_requests_together(client, monkeypatch):
+    from test_design import FakeClaude
+    from html2mp4 import ai
+    config.set_api_key("sk-ant-test-key-1234567890")
+    monkeypatch.setattr(ai, "structured", FakeClaude())
+    r = client.post("/api/write/generate", json={"script": script.EXAMPLE, "mode": "design"}).json()
+    assert wait(client, r["job"], 240)["status"] == "done"
+    pid = r["project"]; before = projects.slides(pid)
+    fake = FakeClaude(); monkeypatch.setattr(ai, "structured", fake)
+    mid = script.EXAMPLE.replace("## The SBI model", "## A new idea\nShow: One · Two\nSay: Something new.\n\n## The SBI model")
+    out = client.post(f"/api/projects/{pid}/apply", json={"script": mid, "requests": [{"slides": ["s3", "s99"], "request": "make it a flow"}]}).json()
+    assert out["changed"] == ["s2"] and wait(client, out["job"], 240)["status"] == "done"
+    sent = fake.of("revise")
+    assert sorted(re.search(r"from: ([^.]*)\.", r["text"]).group(1) for r in sent) == ["s2", "s3"]      # side by side, one call per slide
+    assert all("make it a flow" in r["text"] and "Visual changes" in r["text"] for r in sent)
+    assert not fake.of("design")                                                   # nothing else was designed
+    after = projects.slides(pid)
+    assert after["s1"] == before["s1"] and after["s4"]["html"] == before["s3"]["html"]      # the slide after the insert kept its design
+    p = client.get(f"/api/projects/{pid}").json()
+    assert p["current"] == 2 and p["versions"][-1]["note"].startswith("Assistant: script edited (1 slide) and 1 visual change") and "A new idea" in p["script"]
+    # a visual request alone leaves the script alone and touches only the slide it names
+    fake2 = FakeClaude(); monkeypatch.setattr(ai, "structured", fake2)
+    out = client.post(f"/api/projects/{pid}/apply", json={"requests": [{"slides": ["s1"], "request": "bigger title"}]}).json()
+    assert out["changed"] == [] and wait(client, out["job"], 240)["status"] == "done" and re.search(r"from: s1\.", fake2.of("revise")[0]["text"])
+    assert client.post(f"/api/projects/{pid}/apply", json={}).json() == {"job": None, "changed": []}
+
+
+def test_apply_refuses_visual_changes_on_a_quick_layout(client):
+    config.set_api_key("sk-ant-test-key-1234567890")
+    r = client.post("/api/write/generate", json={"script": script.EXAMPLE, "mode": "basic"}).json(); wait(client, r["job"])
+    bad = client.post(f"/api/projects/{r['project']}/apply", json={"requests": [{"slides": ["s1"], "request": "bigger"}]})
+    assert bad.status_code == 400 and "Design with Claude" in bad.json()["detail"]
+    assert client.post("/api/projects/nope/apply", json={}).status_code == 404

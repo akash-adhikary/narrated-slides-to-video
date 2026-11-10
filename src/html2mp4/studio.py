@@ -568,7 +568,7 @@ def eta_for(job):
     return {"plan": None, "write": left * 12 + 90, "check": 75, "fix": 60, "review": 30}.get(phase)
 
 
-def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
+def run_design(job, project_id, only=None, feedback="", note="", mode="design", remap=None):
     """Design, revise or just re-check slides in the background, then save the result as a new version."""
     def progress(f, label): job.update(progress=round(f, 3), label=label, phase=phase_of(label))
     def activity(kind, text): job["activity"].append({"t": round(time.time() - job["started"], 1), "kind": kind, "text": text})
@@ -583,6 +583,7 @@ def run_design(job, project_id, only=None, feedback="", note="", mode="design"):
             brand = config.brand()
             ref = brandkit.reference_file().read_text() if brandkit.reference_file().exists() else None
             prev = projects.slides(project_id) if p["versions"] else {}
+            if remap is not None: prev = {new: remap_design(prev[old], old, new) for new, old in remap.items() if old in prev}   # reuse designs after slides moved
             if mode == "basic":
                 page = compose.basic_module(m, brand, motion=config.motion(), script_text=p["script"])
                 job.update(progress=0.3, label="Checking every slide, step by step")
@@ -797,25 +798,54 @@ def revise(pid: str, body: ReviseIn):
     return {"job": start_design(pid, only=body.scope or None, feedback=body.feedback.strip(), note=f"Feedback: {body.feedback.strip()[:70]}")}
 
 
+def align_slides(old_text, new_text):
+    """Match the slides of an edited script to the ones before it by content. Returns (remap, changed): `remap` maps a new slide id to the
+    old id whose design can be reused (unchanged slides, and edited ones, which start from their old design), and `changed` lists the new
+    ids that need designing. Adding or removing a slide in the middle therefore doesn't redesign the slides after it."""
+    import difflib
+    old, new = script.parse(old_text), script.parse(new_text)
+    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note)
+    remap, changed = {}, []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [key(x) for x in old.slides], [key(x) for x in new.slides], autojunk=False).get_opcodes():
+        if op == "equal":
+            for k in range(j2 - j1): remap[f"s{j1 + k + 1}"] = f"s{i1 + k + 1}"
+        elif op in ("replace", "insert"):
+            for k in range(j2 - j1):
+                changed.append(f"s{j1 + k + 1}")
+                if op == "replace" and k < i2 - i1: remap[f"s{j1 + k + 1}"] = f"s{i1 + k + 1}"
+    if old.intro != new.intro or old.title != new.title or old.subtitle != new.subtitle: changed.insert(0, "s0")
+    return remap, changed
+
+
 def changed_slides(old_text, new_text):
     """Slide ids whose script changed (or are new), so only those are redesigned after an edit."""
-    old, new = script.parse(old_text), script.parse(new_text)
-    key = lambda s: (s.title, s.say, s.show, s.screen, s.note)
-    return [f"s{i + 1}" for i, s in enumerate(new.slides) if i >= len(old.slides) or key(s) != key(old.slides[i])]
+    return [i for i in align_slides(old_text, new_text)[1] if i != "s0"]
 
 
-def edit_note(old_text, new_text, ids):
+def edit_note(old_text, new_text, ids, remap=None):
     """What to tell the designer when a script was edited: which slides, and what the narration used to say."""
     if not ids: return ""
     old, new = script.parse(old_text), script.parse(new_text)
+    remap = remap if remap is not None else {f"s{i + 1}": f"s{i + 1}" for i in range(min(len(old.slides), len(new.slides)))}
     lines = [f"The script was edited, so update the design of {', '.join(ids)} to match the new narration and on-screen text. "
              "Keep the same look and feel. Keep everything the author's on-screen description still asks for, even if the narration "
              "no longer says it aloud (it can appear with the nearest sentence). Remove only what the edit removed."]
     for sid in ids:
-        i = int(sid[1:]) - 1
-        if i < len(old.slides): lines.append(f"The previous narration of {sid}:\n" + "\n".join(f"  {k}: {t}" for k, t in enumerate(old.slides[i].say)))
+        o = remap.get(sid)
+        if o and int(o[1:]) <= len(old.slides): lines.append(f"The previous narration of {sid}:\n" + "\n".join(f"  {k}: {t}" for k, t in enumerate(old.slides[int(o[1:]) - 1].say)))
         else: lines.append(f"{sid} is a new slide: design it to match the other slides.")
     return "\n".join(lines)
+
+
+def remap_design(design_, old, new):
+    """A slide's saved design, moved from slide id `old` to `new`: its CSS selectors (#s3 ...) and the ids it declares and refers to
+    (id="s3-glow", url(#s3-glow)) follow it. Class names that merely start with the old id (class="s3-card") are left alone: the CSS
+    that styles them still uses them, scoped under the new id."""
+    if old == new: return dict(design_)
+    ref = re.compile(rf"(#{re.escape(old)})(?!\d)")
+    decl = re.compile(rf"(\b(?:id|for|aria-labelledby|aria-describedby)\s*=\s*[\"']){re.escape(old)}(?!\d)")
+    def fix(text): return decl.sub(lambda m: m.group(1) + new, ref.sub("#" + new, text))
+    return {k: (fix(v) if isinstance(v, str) and k in ("html", "css") else v) for k, v in design_.items()}
 
 
 @app.put("/api/projects/{pid}/script")
@@ -826,7 +856,8 @@ def update_script(pid: str, body: ScriptIn):
     parse_or_422(body.script, body.title, body.subtitle)
     if body.script == p["script"]: return {"job": None, "changed": []}
     old = p["script"]
-    ids = changed_slides(old, body.script) if p["versions"] else []
+    remap, ids = align_slides(old, body.script) if p["versions"] else ({}, [])
+    ids = [i for i in ids if i != "s0"]
     projects.set_script(pid, body.script)
     if not p["versions"]: return {"job": None, "changed": []}
     if ids and not config.api_key_status()["set"] and p["versions"][-1].get("mode") != "basic":
@@ -834,8 +865,42 @@ def update_script(pid: str, body: ScriptIn):
     last_mode = p["versions"][-1].get("mode", "design")
     if last_mode == "basic":
         return {"job": start_design(pid, mode="basic", note="Script edited"), "changed": ids}
-    return {"job": start_design(pid, only=ids or None, feedback=edit_note(old, body.script, ids),
+    return {"job": start_design(pid, only=ids or None, feedback=edit_note(old, body.script, ids, remap), remap=remap,
                                 note=f"Script edited ({len(ids)} slide{'s' if len(ids) != 1 else ''} redesigned)"), "changed": ids}
+
+
+class ApplyIn(BaseModel):
+    script: str | None = None
+    requests: list[dict] = []
+
+
+@app.post("/api/projects/{pid}/apply")
+def apply_changes(pid: str, body: ApplyIn):
+    """Bring the slides up to date with a script edit and any visual requests together, in one design run that touches only what changed."""
+    p = projects.get(pid)
+    if not p or not p["versions"]: raise HTTPException(404, "Design the slides first.")
+    text = body.script if body.script is not None else p["script"]
+    m = parse_or_422(text)
+    reqs = [{"slides": [x for x in r.get("slides", []) if re.fullmatch(r"s\d+", str(x)) and int(x[1:]) <= len(m.slides)], "request": str(r.get("request", "")).strip()}
+            for r in body.requests if str(r.get("request", "")).strip()]
+    last_mode = p["versions"][-1].get("mode", "design")
+    if reqs and last_mode == "basic": raise HTTPException(400, "Visual changes need the Claude design. Press 'Design with Claude' first.")
+    if not config.api_key_status()["set"] and (reqs or last_mode != "basic"): raise HTTPException(400, "Add your Anthropic API key in Settings first.")
+    old = p["script"]
+    remap, ids = align_slides(old, text) if text != old else ({f"s{i + 1}": f"s{i + 1}" for i in range(len(m.slides))}, [])
+    ids = [i for i in ids if i != "s0"]
+    if text != old: projects.set_script(pid, text)
+    if last_mode == "basic" and not reqs:
+        return {"job": start_design(pid, mode="basic", note="Script edited"), "changed": ids} if text != old else {"job": None, "changed": []}
+    scoped = sorted({i for r in reqs for i in r["slides"]}, key=lambda x: int(x[1:]))
+    whole = any(not r["slides"] for r in reqs)
+    only = None if whole else sorted(set(ids) | set(scoped), key=lambda x: int(x[1:]))
+    if not whole and not only: return {"job": None, "changed": []}
+    feedback = "\n".join(x for x in [edit_note(old, text, ids, remap) if ids else "",
+        ("Visual changes the author asked for:\n" + "\n".join(f"- {('slides ' + ', '.join(r['slides'])) if r['slides'] else 'the whole module'}: {r['request']}" for r in reqs)) if reqs else ""] if x)
+    for r in reqs: projects.add_feedback(pid, r["request"], r["slides"] or "all")
+    parts = ([f"script edited ({len(ids)} slide{'s' if len(ids) != 1 else ''})"] if ids else []) + ([f"{len(reqs)} visual change{'s' if len(reqs) != 1 else ''}"] if reqs else [])
+    return {"job": start_design(pid, only=only, feedback=feedback, remap=remap, note="Assistant: " + " and ".join(parts)), "changed": ids}
 
 
 @app.post("/api/projects/{pid}/design")

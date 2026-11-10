@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The script assistant works on designed modules too: one message can change the words and the look, shown on a single card with an **Apply to slides** button (or automatic apply), with progress in the chat. Edits are slide-level patches, so replies are quick and untouched slides stay identical.
 - Script assistant: a floating, glowing chat on the Write page to build a script by talking to Claude (type or speak), then keep tweaking the script and, once designed, the look of slides. It edits the script box with an undo, lists which slides changed, leaves untouched slides word for word the same, and offers Design / Update / Apply buttons instead of acting on its own. Pasting a structured script still works.
 - ThoughtSpot is now the built-in brand: a fresh install starts with the ThoughtSpot colours, dark and light logos, design rules, pronunciations and the Geist / Geist Mono fonts (SIL OFL), so slides come out on-brand with no setup. Settings > Brand kit still replaces it and Reset returns to it; `HTML2MP4_BRAND=neutral` starts from the plain brand. Anyone with a saved brand is unchanged.
 - **Motion and graphics.** Slides are no longer just cards. Claude now has a tested motion kit (entrances such as pop, slide, blur and
@@ -21,6 +22,7 @@ All notable changes to this project are documented here. The format follows
   flagged). Pronunciations in the file are added to your list if you don't have them yet.
 
 ### Fixed
+- Adding or removing a slide in the middle of a designed module redesigned every slide after it. Slides are now matched by content, and unchanged ones keep their designs (with their ids moved). Changed slides are redesigned side by side instead of in one long call.
 - **Studio voice could stop with no explanation.** Found by testing in the real Studio. After the Studio was restarted the player kept
   "playing" in silence. Now the voice's addresses survive a restart and anything already voiced is ready instantly; a lost voice is
   reported ("Reconnecting…") and retried for about 10 seconds before falling back, visibly, to your browser's voice; a browser that

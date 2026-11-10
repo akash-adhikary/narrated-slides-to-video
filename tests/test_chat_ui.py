@@ -14,7 +14,9 @@ class U: input_tokens, output_tokens = 2000, 400
 def fake(system, content, schema, effort="low", max_tokens=0, on_text=None, on_thinking=None, messages=None):
     last = messages[-1]["content"]
     if "boom" in last: raise ai.AIError("Anthropic's rate limit was reached. Wait a minute and try again.")
-    if "<script>" in last:
+    if "<script>" in last and "flow" in last.split("The person says:")[-1]:
+        a = {"reply": "Making it a flow.", "script": None, "edits": [], "summary": [], "visual_requests": [{"slides": ["s1"], "request": "make it a flow"}], "suggestions": []}
+    elif "<script>" in last:
         cur = last.split("<script>\n")[1].split("\n</script>")[0]
         a = {"reply": "Reworded it.", "script": cur.replace("you meet your buddy", "your buddy meets you") + "\n", "summary": ["Reworded slide 1"], "visual_requests": [], "suggestions": []}
     elif "write" in last.lower():
@@ -52,6 +54,17 @@ def page(app):
 
 
 def idle(page): page.wait_for_function("!C.busy")
+
+
+def quick_project(app):
+    """A module with a quick-layout design (no model needed), ready to be opened on the Write page."""
+    import urllib.request
+    req = urllib.request.Request(app + "/api/write/generate", data=json.dumps({"script": DRAFT, "mode": "basic"}).encode(), headers={"Content-Type": "application/json"})
+    r = json.load(urllib.request.urlopen(req))
+    for _ in range(200):
+        if json.load(urllib.request.urlopen(f"{app}/api/write/jobs/{r['job']['id']}"))["status"] == "done": return r["project"]
+        time.sleep(0.2)
+    raise AssertionError("design did not finish")
 
 
 def send(page, text):
@@ -115,3 +128,36 @@ def test_the_chat_fits_a_phone_screen(page):
     page.set_viewport_size({"width": 375, "height": 760}); page.click("#aiOrb")
     box = page.locator("#aiPanel").bounding_box()
     assert box["x"] >= 0 and box["x"] + box["width"] <= 376 and page.evaluate("document.documentElement.scrollWidth") <= 376
+
+
+def test_once_the_slides_exist_the_chat_applies_changes_to_them(page, app):
+    pid = quick_project(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#aiOrb"); assert page.is_visible("#aiAutoRow")
+    send(page, "reword the buddy line")
+    page.wait_for_selector(".ai-card:has-text('Script updated')")
+    page.locator(".ai-card [data-act=apply]").last.click()
+    page.wait_for_selector(".ai-card:has-text('Slides updated')", timeout=90000)
+    assert "Undo" not in page.locator(".ai-card").last.inner_text()
+    page.wait_for_function("W.current && W.current.current === 2 && W.current.script.includes('your buddy meets you')")
+
+
+def test_auto_apply_updates_the_slides_without_a_click(page, app):
+    pid = quick_project(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#aiOrb"); page.check("#aiAuto")
+    send(page, "reword the buddy line")
+    page.wait_for_selector(".ai-card:has-text('Slides updated')", timeout=90000)
+    page.reload(); page.wait_for_selector("#aiOrb"); page.click("#aiOrb")
+    assert page.is_checked("#aiAuto") is True                                  # the choice is remembered
+
+
+def test_visual_requests_arrive_as_one_card_and_a_quick_layout_explains_why_it_cannot(page, app):
+    pid = quick_project(app)
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#cardReview:not([hidden])", timeout=60000)
+    page.click("#aiOrb"); send(page, "make slide 1 a flow")
+    page.wait_for_selector(".ai-card:has-text('Change to how it looks')")
+    assert "make it a flow" in page.inner_text(".ai-card") and "Your first day" in page.inner_text(".ai-card .tag.look")
+    page.locator(".ai-card [data-act=apply]").click()
+    page.wait_for_selector(".ai-card .quiet.bad:has-text('Design with Claude')")
+    assert page.locator(".ai-card [data-act=apply]").inner_text() == "Try again"

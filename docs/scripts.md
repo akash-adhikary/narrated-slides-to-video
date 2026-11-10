@@ -18,9 +18,13 @@ You don't have to write the script yourself. Press the glowing **Build with AI**
   comparison". Claude edits the script in the box and lists what changed. Slides you didn't ask about stay word for word the same, so
   they aren't redesigned. Anything you type into the box by hand is picked up on the next message.
 - **Undo any change** from the card in the chat. Nothing is designed until you press **Design slides** (or **Update slides**).
-- **Change how slides look.** Once the slides are designed, ask for visual changes ("make slide 3 a flow", "more animation on the
-  stats slide"). Claude offers an **Apply to slides** button that sends it to the designer. Before the slides exist, Claude puts the
-  visual ideas in the script as `Note:` lines instead.
+- **Change the slides in the same conversation.** Once the slides are designed, the same chat changes them: words ("add a slide about
+  follow-up questions") and looks ("make the second to last slide a timeline"), in one message. Claude lists what changes on a card with
+  one **Apply to slides** button; the progress shows in the chat. Turn on **Apply changes to the slides automatically** to skip the
+  button. Before the slides exist, Claude puts visual ideas in the script as `Note:` lines instead.
+- **It only redoes what changed.** Claude edits just the slides it touches (so a reply takes seconds, not a rewrite of the whole script),
+  and only those slides are redesigned, side by side. Adding or removing a slide in the middle doesn't redesign the ones after it: they
+  keep their designs. A change to two slides typically takes 1 to 2 minutes and about $0.50.
 - **Mix it with pasting.** Paste a structured script, open a file, or start from the example, and use the chat to improve it. The
   conversation is remembered per module in your browser (**New chat** clears it).
 

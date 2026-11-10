@@ -376,7 +376,7 @@ def design(module, brand, *, glossary=None, reference=None, previous=None, only=
         run.say(0.05, "Applying your feedback")
         run.event("plan", f"Applying your feedback to {_span(only) if set(only) != set(ids) else 'the whole module'}: “{feedback[:90]}”")
         run.total = len(only)
-        batches = [only] if len(only) <= 3 else plan_batches(only, lead=0)
+        batches = plan_batches(only, lead=0)                  # side by side, one slide each while there are few: the wait is the slowest slide, not the sum
 
         def revise(batch, name):
             content = (head + "\nThe current design of the slides to change (and the others, for consistency):\n" + _current_text(slides, ids)

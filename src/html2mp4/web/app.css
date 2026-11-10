@@ -523,3 +523,9 @@ body[data-page="write"] .ai{display:block}
   .ai-panel,.ai-panel.wide{right:0;left:0;bottom:0;width:auto;max-width:none;height:min(88vh,720px);border-radius:24px 24px 0 0}
 }
 @media (prefers-reduced-motion:reduce){.ai *,.ai-panel,.ai-panel::before,.ai-panel::after,.ai-orb *{animation:none!important;transition:none!important}.ai-log{scroll-behavior:auto}}
+.ai-auto{display:flex;align-items:center;gap:8px;margin:0 18px 4px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+.ai-auto input{accent-color:#6a5cf0;width:15px;height:15px}
+.ai-card .tag.look{background:color-mix(in srgb,var(--g3) 18%,transparent);color:var(--ink-2);text-transform:none;letter-spacing:0;font-weight:500;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-card .quiet.bad{color:var(--err)}
+.ai-card .spin{display:inline-block;width:11px;height:11px;margin-right:7px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--g1);animation:ai-rot .8s linear infinite;vertical-align:-1px}
+@keyframes ai-rot{to{transform:rotate(360deg)}}

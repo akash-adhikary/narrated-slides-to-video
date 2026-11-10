@@ -1,11 +1,11 @@
 // The script assistant: a floating chat that builds the script with you and keeps tweaking it (and the slides) as you talk.
 // It edits the script box on the Write page (with an undo); designing slides stays an explicit step.
-const C = {open: false, busy: false, items: [], cost: 0, rec: null, listening: false};
+const C = {open: false, busy: false, items: [], cost: 0, rec: null, listening: false, auto: (() => { try{ return localStorage.getItem("h2m-chat-auto") === "1"; }catch{ return false; } })()};
 const aiEl = {panel: $("#aiPanel"), orb: $("#aiOrb"), log: $("#aiLog"), chips: $("#aiChips"), input: $("#aiInput"), send: $("#aiSend"), state: $("#aiState")};
 const chatKey = () => "h2m-chat:" + (W.project || "draft");
 const store = {
   load(){ try{ return JSON.parse(localStorage.getItem(chatKey()) || "[]"); }catch{ return []; } },
-  save(){ try{ localStorage.setItem(chatKey(), JSON.stringify(C.items.filter(i => i.text || i.kind).slice(-60).map(({before, ...rest}) => rest))); }catch{} },
+  save(){ try{ localStorage.setItem(chatKey(), JSON.stringify(C.items.filter(i => i.text || i.kind).slice(-60).map(({before, running, state, ...rest}) => rest))); }catch{} },
 };
 const STARTERS_NEW = ["Help me plan a module from scratch", "Write a 5 minute script on a topic", "I'll paste my notes"];
 const STARTERS_HAVE = ["Make it shorter", "Make the opening more engaging", "Add a closing recap slide"];
@@ -40,29 +40,33 @@ $("#aiNew").addEventListener("click", () => {
   C.items = []; C.cost = 0; store.save(); try{ localStorage.removeItem(chatKey()); }catch{} render(); aiEl.input.focus();
 });
 setTimeout(() => { if(!C.open && document.body.dataset.page === "write"){ aiEl.orb.classList.add("hello"); setTimeout(() => aiEl.orb.classList.remove("hello"), 7000); } }, 1200);
-// switching module on the Write page switches the conversation too
+// Switching module on the Write page switches the conversation too. A draft conversation moves to the module that its first design
+// creates (W.adopt, set when "Design slides" makes a new module); opening any other module just shows that module's own chat.
 let chatFor = chatKey();
-setInterval(() => { if(chatKey() !== chatFor && !C.busy){ const from = chatFor; chatFor = chatKey();
-  if(from === "h2m-chat:draft" && W.project && C.items.length){ store.save(); }          // a draft conversation becomes the module's
-  C.items = store.load(); if(C.open) render(); } }, 700);
+setInterval(() => {
+  if(chatKey() === chatFor || C.busy || C.items.some(i => i.running)) return;
+  const from = chatFor; chatFor = chatKey();
+  if(from === "h2m-chat:draft" && W.adopt && W.adopt === W.project){ store.save(); try{ localStorage.removeItem(from); }catch{} W.adopt = null; }
+  else{ C.items = store.load(); C.cost = 0; }
+  if(C.open) render();
+}, 400);
 
 /* ---------- drawing the conversation ---------- */
 const slideTitle = id => id === "s0" ? "Title slide" : ((W.outline && W.outline.slides.find(x => x.id === id)) || {}).title || id;
 const SPARK = `<svg viewBox="0 0 16 16"><path d="M8 1.5l1.4 3.9L13.5 7 9.4 8.4 8 12.5 6.6 8.4 2.5 7l4.1-1.6z"/></svg>`;
+const designed = () => !!(W.project && W.current && W.current.versions && W.current.versions.length);
 function card(i, idx){
-  if(i.kind === "update"){
-    const rows = (i.changes || []).map(c => `<li><span class="tag ${c.kind}">${c.kind}</span><span>${c.slide === "s0" ? "Title slide · " : ""}${esc(c.title)}</span></li>`).join("");
-    const sum = (i.summary || []).map(s => `<li><span>${esc(s)}</span></li>`).join("");
-    const next = W.project ? "Update slides" : "Design slides";
-    return `<div class="ai-card" data-i="${idx}"><h5>${SPARK.replace("<svg", '<svg stroke="none" fill="currentColor"')}Script updated</h5><ul>${rows || sum}</ul>
-      ${i.undone ? `<div class="quiet">Undone. Your script is back as it was.</div>` : `<div class="acts"><button type="button" class="go" data-act="design">${next}</button>${i.before != null ? `<button type="button" data-act="undo">Undo</button>` : ""}</div>`}</div>`;
-  }
-  if(i.kind === "visual"){
-    return `<div class="ai-card" data-i="${idx}"><h5>${SPARK.replace("<svg", '<svg stroke="none" fill="currentColor"')}Change to how it looks</h5>
-      <ul>${i.requests.map(r => `<li><span class="tag">${r.slides.length ? r.slides.map(slideTitle).join(", ") : "all slides"}</span><span>${esc(r.request)}</span></li>`).join("")}</ul>
-      ${i.applied ? `<div class="quiet">Sent to the designer. Watch the progress on the page.</div>` : `<div class="acts"><button type="button" class="go" data-act="apply">Apply to slides</button></div>`}</div>`;
-  }
-  return "";
+  if(i.kind !== "update") return "";
+  const scriptRows = (i.changes || []).map(c => `<li><span class="tag ${c.kind}">${c.kind}</span><span>${c.slide === "s0" ? "Title slide · " : ""}${esc(c.title)}</span></li>`).join("")
+    || (i.summary || []).map(s => `<li><span>${esc(s)}</span></li>`).join("");
+  const lookRows = (i.requests || []).map(r => `<li><span class="tag look">${r.slides.length ? r.slides.map(slideTitle).join(", ") : "all slides"}</span><span>${esc(r.request)}</span></li>`).join("");
+  const title = scriptRows && lookRows ? "Script and look" : lookRows ? "Change to how it looks" : "Script updated";
+  const busy = i.running, finished = i.done || i.failed;
+  const status = i.undone ? "Undone. Your script is back as it was." : busy ? `<span class="spin"></span>${esc(i.state || "Starting…")}` : i.done ? `✓ ${esc(i.done)}` : i.failed ? esc(i.failed) : "";
+  const go = designed() ? "Apply to slides" : "Design slides";
+  const acts = i.undone || busy || i.done ? "" : `<div class="acts"><button type="button" class="go" data-act="apply">${i.failed ? "Try again" : go}</button>${i.before != null && !i.failed ? `<button type="button" data-act="undo">Undo</button>` : ""}</div>`;
+  return `<div class="ai-card" data-i="${idx}"><h5>${SPARK.replace("<svg", '<svg stroke="none" fill="currentColor"')}${title}</h5><ul>${scriptRows}${lookRows}</ul>
+    ${status ? `<div class="quiet${i.failed ? " bad" : ""}">${status}</div>` : ""}${acts}</div>`;
 }
 function render(){
   const log = aiEl.log, atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80 || !log.children.length;
@@ -85,6 +89,7 @@ function render(){
     const lastBot = [...C.items].reverse().find(i => i.role === "assistant" && !i.kind && !i.error);
     renderChips(!C.busy && lastBot && lastBot === C.items.filter(i => !i.kind).at(-1) && lastBot.suggestions ? lastBot.suggestions : []);
   }
+  $("#aiAutoRow").hidden = !designed();
   aiEl.panel.classList.toggle("busy", C.busy);
   aiEl.send.disabled = C.busy;
   aiEl.state.textContent = C.busy ? (C.stage || "Thinking…") : C.cost ? `Ready · about $${C.cost.toFixed(2)} this chat` : "Ready when you are";
@@ -94,6 +99,8 @@ function renderChips(list){
   const key = list.join("|"); if(aiEl.chips.dataset.key === key) return;
   aiEl.chips.dataset.key = key; aiEl.chips.classList.add("new"); aiEl.chips.innerHTML = list.map(t => `<button type="button">${esc(t)}</button>`).join("");
 }
+$("#aiAuto").checked = C.auto;
+$("#aiAuto").addEventListener("change", e => { C.auto = e.target.checked; try{ localStorage.setItem("h2m-chat-auto", C.auto ? "1" : "0"); }catch{} });
 aiEl.chips.addEventListener("click", e => {
   const b = e.target.closest("button"); if(!b || C.busy) return;
   if(b.textContent === "I'll paste my notes"){ aiEl.input.value = "Here are my notes:\n\n"; aiEl.input.focus(); autosize(); return; }
@@ -127,34 +134,52 @@ async function sendMessage(text){
     }
     if(j.status === "failed") throw new Error(j.error);
     const r = j.result; bot.text = r.reply; bot.streaming = false; bot.suggestions = r.suggestions; C.cost += r.cost || 0;
+    let before = null;
     if(r.script){
-      const before = box.value; box.value = r.script; draft.set(r.script); parseNow();
+      before = box.value; box.value = r.script; draft.set(r.script); parseNow();
       box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
-      C.items.push({kind: "update", changes: r.changes, summary: r.summary, before});
     }
-    if(r.visual_requests.length) C.items.push({kind: "visual", requests: r.visual_requests});
+    if(r.script || r.visual_requests.length){
+      const c = {kind: "update", changes: r.changes, summary: r.summary, requests: r.visual_requests, before};
+      C.items.push(c);
+      if(C.auto && designed()) setTimeout(() => applyCard(c), 0);
+    }
   }catch(err){
     C.items = C.items.filter(i => i !== bot); C.items.push({role: "assistant", error: true, text: err.message});
   }finally{
-    C.busy = false; C.stage = ""; bot.streaming = false; store.save(); render(); if(C.open) aiEl.input.focus();
+    C.busy = false; C.stage = ""; bot.streaming = false; chatFor = chatKey(); store.save(); render(); if(C.open) aiEl.input.focus();
   }
 }
 
 /* ---------- the buttons on a card ---------- */
+async function applyCard(i){
+  if(i.running) return;
+  if(!designed()){                                            // nothing designed yet: the page's own Design button does it
+    if($("#wDesign").disabled){ toast(W.busy ? "Claude is still designing. Try again when it finishes." : !W.keySet ? "Add your Anthropic API key in Settings first." : "The slides already match your script."); return; }
+    $("#wDesign").click(); setOpen(false); return;
+  }
+  if(W.busy){ toast("Claude is still designing. Try again when it finishes."); return; }
+  i.running = true; i.failed = ""; i.state = "Starting…"; render();
+  try{
+    const r = await post(`/api/projects/${W.project}/apply`, {script: box.value, requests: i.requests || []});
+    if(!r.job){ i.running = false; i.done = "The slides already match."; store.save(); render(); return; }
+    trackJob(r.job, W.project, true);                          // the page shows the same progress; this keeps the chat in step
+    for(;;){
+      await new Promise(res => setTimeout(res, 1200));
+      const j = await api(`/api/write/jobs/${r.job.id}`);
+      i.state = `${Math.round(j.progress * 100)}% · ${j.status === "queued" ? "Waiting for the previous design" : j.label}`; render();
+      if(j.status === "done"){ i.running = false; i.done = r.changed && r.changed.length ? `Slides updated (${r.changed.length} redesigned).` : "Slides updated."; delete i.before; break; }
+      if(j.status === "failed") throw new Error(j.error || "The design failed");
+    }
+  }catch(err){ i.running = false; i.failed = err.message; }
+  store.save(); render();
+}
+
 aiEl.log.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if(!b) return;
   const i = C.items[+b.closest(".ai-card").dataset.i];
   if(b.dataset.act === "undo"){ box.value = i.before; draft.set(i.before); parseNow(); i.undone = true; delete i.before; store.save(); render(); toast("Script restored"); }
-  if(b.dataset.act === "design"){
-    if($("#wDesign").disabled){ toast(W.busy ? "Claude is still designing. Try again when it finishes." : !W.keySet ? "Add your Anthropic API key in Settings first." : "The slides already match your script."); return; }
-    setOpen(false); $("#wDesign").click();
-  }
-  if(b.dataset.act === "apply"){
-    if(!W.project || !W.current || !W.current.versions.length){ toast("Design the slides first, then apply visual changes."); return; }
-    if(box.value !== W.saved){ toast("Update the slides first so they match your script, then apply this."); return; }
-    setOpen(false); i.applied = true; store.save();
-    for(const r of i.requests) await startJob(post(`/api/projects/${W.project}/revise`, {feedback: r.request, scope: r.slides}).then(x => ({...x, project: W.project})));
-  }
+  if(b.dataset.act === "apply") applyCard(i);
 });
 
 /* ---------- speaking instead of typing ---------- */

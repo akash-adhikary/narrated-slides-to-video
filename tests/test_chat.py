@@ -58,7 +58,7 @@ def test_an_edit_sees_the_current_script_and_lists_only_what_changed():
 def test_a_script_that_cannot_be_read_is_retried_once_then_dropped():
     f = Fake({"reply": "Draft", "script": "this is not a script"}, {"reply": "Fixed", "script": DRAFT})
     r = chat.turn([{"role": "user", "content": "write"}], call=f)
-    assert r["script"] and len(f.calls) == 2 and "could not be read" in f.calls[1]["messages"][-1]["content"]
+    assert r["script"] and len(f.calls) == 2 and "could not be applied" in f.calls[1]["messages"][-1]["content"]
     g = Fake({"script": "nope"}, {"script": "still nope"})
     r = chat.turn([{"role": "user", "content": "write"}], call=g)
     assert r["script"] is None and "right format" in r["reply"] and r["summary"] == []
@@ -143,3 +143,29 @@ def test_the_assistant_is_told_how_slides_are_numbered():
     chat.turn([{"role": "user", "content": "change slide 2"}], current_script=DRAFT, call=f)
     ctx = f.calls[0]["messages"][-1]["content"]
     assert "s0 = slide 1: title slide" in ctx and "s1 = slide 2: Your first day" in ctx
+
+
+def test_edits_change_only_the_slides_they_name():
+    base = DRAFT + "\n## Who to ask\nShow: Buddy · Manager\nSay: Ask your buddy.\n\n## Your next step\nSay: Do one thing.\n"
+    e = lambda op, slide, text="": {"op": op, "slide": slide, "text": text}
+    new = chat.apply_edits(base, [e("replace", "s2", "## Who to ask\nSay: Ask anyone."), e("delete", "s3"), e("insert_after", "s0", "## Quick hello\nSay: Hi."),
+                                  e("insert_after", "s1", "## Bonus\nSay: Extra."), e("header", "s0", "Title: New Title\nSay: Hello.")])
+    m = script.parse(new)
+    assert m.title == "New Title" and m.intro == ["Hello."]
+    assert [s.title for s in m.slides] == ["Quick hello", "Your first day", "Bonus", "Who to ask"]
+    assert m.slides[1].say == ["On day one you meet your buddy.", "Then you set up your laptop."] and m.slides[3].say == ["Ask anyone."]
+    for bad in ([e("replace", "s9", "## X\nSay: y")], [e("replace", "s1", "no heading")], [e("delete", "s0")], [e("header", "s1", "Title: x")], [e("insert_after", "s1", "text")]):
+        with pytest.raises(ValueError): chat.apply_edits(base, bad)
+    with pytest.raises(ValueError, match="Scene format"): chat.apply_edits("Title\nScene 1: Open\nSay hi.", [e("delete", "s1")])
+
+
+def test_a_turn_can_answer_with_edits_instead_of_the_whole_script():
+    edit = {"op": "replace", "slide": "s1", "text": "## Your first day\nShow: Meet your buddy\nSay: On day one you meet your buddy."}
+    f = Fake({"reply": "Shortened.", "edits": [edit], "summary": ["Shortened slide"], "visual_requests": [{"slides": ["s1"], "request": "make it a flow"}]})
+    r = chat.turn([{"role": "user", "content": "shorten the first day"}], current_script=DRAFT, designed=True, slides={"s1": {"layout": "cards"}}, call=f)
+    assert "Then you set up your laptop." not in r["script"] and r["script"].startswith("Title: Onboarding Basics")
+    assert r["changes"] == [{"slide": "s1", "title": "Your first day", "kind": "changed"}]
+    assert r["visual_requests"] == [{"slides": ["s1"], "request": "make it a flow"}]          # a visual change can ride along with the edit
+    f = Fake({"reply": "x", "edits": [{"op": "replace", "slide": "s7", "text": "## A\nSay: b."}]}, {"reply": "Fixed.", "edits": [edit]})
+    r = chat.turn([{"role": "user", "content": "shorten"}], current_script=DRAFT, call=f)
+    assert r["script"] and "no slide s7" in f.calls[1]["messages"][-1]["content"]
