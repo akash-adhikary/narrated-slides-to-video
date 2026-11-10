@@ -161,3 +161,21 @@ def test_visual_requests_arrive_as_one_card_and_a_quick_layout_explains_why_it_c
     page.locator(".ai-card [data-act=apply]").click()
     page.wait_for_selector(".ai-card .quiet.bad:has-text('Design with Claude')")
     assert page.locator(".ai-card [data-act=apply]").inner_text() == "Try again"
+
+
+def test_share_menu_yaml_view_and_opening_a_module_file(page, app, tmp_path):
+    pid = quick_project(app)
+    page.goto(app + "/#write"); page.wait_for_selector("#aiOrb")
+    page.evaluate("pid => openProject(pid)", pid); page.wait_for_selector("#rvShare", state="visible")
+    page.click("#rvShare summary")
+    assert page.is_visible("#rvFile") and page.get_attribute("#rvFileAll", "href").endswith("history=true")
+    with page.expect_download() as d: page.click("#rvFile")
+    saved = tmp_path / "out.h2m.json"; d.value.save_as(saved)
+    assert d.value.suggested_filename.endswith(".h2m.json") and json.loads(saved.read_text())["format"] == "html2mp4.module"
+    page.click("#rvShare summary"); page.click("#rvYaml")
+    page.wait_for_function("document.querySelector('#yvText').textContent.includes('format: html2mp4.module')")
+    assert "script: |" in page.inner_text("#yvText") and page.is_visible("#yvCopy")
+    page.click("#yvClose"); assert page.is_hidden("#yamlView")
+    page.set_input_files("#wImport", str(saved))
+    page.wait_for_function("document.querySelector('#toast').textContent.startsWith('Opened')")
+    assert page.evaluate("W.project") != pid

@@ -529,3 +529,19 @@ body[data-page="write"] .ai{display:block}
 .ai-card .quiet.bad{color:var(--err)}
 .ai-card .spin{display:inline-block;width:11px;height:11px;margin-right:7px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--g1);animation:ai-rot .8s linear infinite;vertical-align:-1px}
 @keyframes ai-rot{to{transform:rotate(360deg)}}
+
+  /* sharing a module: a small menu, and the YAML view */
+  details.share{position:relative;display:inline-block}
+  details.share summary{list-style:none;cursor:pointer}
+  details.share summary::-webkit-details-marker{display:none}
+  details.share summary::after{content:"▾";margin-left:4px;font-size:11px}
+  .share-menu{position:absolute;left:0;bottom:calc(100% + 6px);z-index:20;min-width:260px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:6px}
+  .share-menu a,.share-menu button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;color:var(--ink);background:none;border:0;border-radius:8px;padding:8px 10px;cursor:pointer;text-decoration:none}
+  .share-menu a:hover,.share-menu button:hover{background:var(--line-2)}
+  .share-menu small{display:block;color:var(--muted);font-size:12px}
+  dialog#yamlView{margin:auto;width:min(920px,94vw);height:min(720px,86vh);padding:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);box-shadow:0 30px 80px rgba(0,0,0,.35)}
+  dialog#yamlView[open]{display:flex;flex-direction:column}
+  dialog#yamlView::backdrop{background:rgba(10,10,14,.55)}
+  .yv-bar{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .yv-bar span{color:var(--muted);font-size:13px;margin-right:auto}
+  #yvText{flex:1;margin:0;padding:16px 18px;overflow:auto;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;tab-size:2;color:var(--ink-2)}

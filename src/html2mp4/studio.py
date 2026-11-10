@@ -7,11 +7,11 @@ import dataclasses, json, os, pathlib, queue, re, shutil, socket, subprocess, sy
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import chat, ai, brandkit, cli, compose, config, design, music as music_beds, projects, review, script, verify
+from html2mp4 import chat, ai, brandkit, cli, compose, config, design, modulefile, music as music_beds, projects, review, script, verify
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
@@ -697,6 +697,7 @@ def import_module(file: UploadFile = File(...)):
     if len(raw) > 60 * 1024 * 1024: raise HTTPException(413, "That file is too large.")
     try: page = raw.decode("utf-8")
     except UnicodeDecodeError: raise HTTPException(422, "That doesn't look like a module file.")
+    if modulefile.sniff(page): return import_module_file(page)
     data = compose.read_project(page)
     if not data:
         raise HTTPException(422, "This file wasn't made in the Studio, so it can't be opened for editing here. "
@@ -713,6 +714,48 @@ def import_module(file: UploadFile = File(...)):
         if isinstance(word, str) and isinstance(said, str) and word not in config.glossary()["pronunciations"]: added[word] = said
     if added: config.set_glossary({"pronunciations": {**config.glossary()["pronunciations"], **added}})
     return {"project": p["id"], "title": m.title, "edited": data["edited"], "pronunciations_added": len(added)}
+
+
+def import_module_file(text):
+    """Open a module file (.h2m.json or .h2m.yaml) as a new project, with its versions if it has them."""
+    try: got = modulefile.loads(text)
+    except modulefile.ModuleFileError as e: raise HTTPException(422, str(e))
+    doc = got["doc"]
+    try: m = script.parse(doc["script"])
+    except script.ScriptError as e: raise HTTPException(422, f"The script inside this file couldn't be read: {e}")
+    p = projects.create(m.title, doc["script"])
+    versions = sorted((v for v in doc.get("versions") or [] if isinstance(v.get("html"), str)), key=lambda v: v["n"])
+    for v in versions:
+        slides = v.get("slides") if isinstance(v.get("slides"), dict) else None
+        is_current = v["n"] == doc.get("current")
+        found = verify.inspect(v["html"], m, config.glossary()["banned"], shots=False)["issues"] if is_current else []   # the others are history
+        note = (v.get("note") or "Imported from a file") if len(versions) > 1 else "Imported from a file" + (" (changed outside the Studio)" if got["edited"] else "")
+        projects.save_version(p["id"], v["html"], slides, note, issues=found, script_text=v.get("script") or doc["script"],
+                              mode=v.get("mode") if v.get("mode") in ("design", "basic") else ("design" if slides else "basic"),
+                              at=v.get("at") if isinstance(v.get("at"), (int, float)) else None)
+    if versions:
+        saved = projects.get(p["id"])["versions"]
+        projects.set_current(p["id"], saved[[v["n"] for v in versions].index(doc["current"])]["n"])
+        projects.set_script(p["id"], doc["script"])                      # the file's own script wins: a hand edit there is the person's intent
+    added = {}
+    for word, said in (doc.get("pronunciations") or {}).items():
+        if isinstance(word, str) and isinstance(said, str) and word not in config.glossary()["pronunciations"]: added[word] = said
+    if added: config.set_glossary({"pronunciations": {**config.glossary()["pronunciations"], **added}})
+    return {"project": p["id"], "title": m.title, "edited": got["edited"], "pronunciations_added": len(added),
+            "versions": len(versions), "designed": bool(versions)}
+
+
+@app.get("/api/projects/{pid}/export")
+def export_module(pid: str, format: str = "json", history: bool = False, v: int | None = None, inline: bool = False):
+    """The module as one file you can share: script, slide designs, the finished page and (optionally) every version.
+    JSON by default; format=yaml gives the same data for reading. `inline` shows it instead of downloading it."""
+    if format not in ("json", "yaml"): raise HTTPException(400, "format must be json or yaml")
+    try: doc = modulefile.build(pid, version=v, history=history)
+    except modulefile.ModuleFileError as e: raise HTTPException(404, str(e))
+    body = modulefile.dumps(doc, format)
+    head = {"Cache-Control": "no-store"}
+    if not inline: head["Content-Disposition"] = f'attachment; filename="{modulefile.filename(doc["title"], format)}"'
+    return Response(body, media_type="text/plain; charset=utf-8" if inline else ("application/x-yaml" if format == "yaml" else "application/json"), headers=head)
 
 
 narrations = {}                       # id -> progress of a voice being made (only while it is being made)

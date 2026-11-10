@@ -36,7 +36,7 @@
       <button class="link ask" type="button" id="wAsk"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l1.6 4.4L14 7l-4.4 1.6L8 13l-1.6-4.4L2 7l4.4-1.6z"/></svg>Build it with AI</button>
       <button class="link" type="button" id="wExample">Insert an example</button>
       <label class="link" for="wFile">Open a text file</label><input type="file" id="wFile" accept=".txt,.md,text/plain" hidden>
-      <label class="link" for="wImport" title="A module file you or a colleague downloaded from the Studio">Open a module file (.html)</label><input type="file" id="wImport" accept=".html,.htm,text/html" hidden>
+      <label class="link" for="wImport" title="A module file (.html, .h2m.json or .h2m.yaml) you or a colleague downloaded from the Studio">Open a module file</label><input type="file" id="wImport" accept=".html,.htm,.json,.yaml,.yml,text/html,application/json" hidden>
       <button class="link" type="button" id="wHelp">How to write it</button>
       <button class="link" type="button" id="wNew" hidden>Start a new module</button>
     </div>
@@ -93,7 +93,16 @@ Note: three cards, left to right</pre>
         <iframe id="rvFrame" title="Slide preview" src="about:blank" allow="fullscreen; autoplay" allowfullscreen></iframe>
         <div class="rv-bar"><select id="rvVersion" aria-label="Version"></select><button class="link" type="button" id="rvRestore" hidden>Restore this version</button>
           <a class="link" id="rvOpen" target="_blank" rel="noopener" title="Open the player in its own tab">Open large</a>
-          <a class="link" id="rvDownload" title="One HTML file to review or share. It plays with your browser's voice and can be opened again here.">Download HTML</a></div>
+          <details class="share" id="rvShare"><summary class="link" title="Download this module to share it">Share</summary>
+            <div class="share-menu">
+              <a id="rvDownload" title="One HTML file to review or share. It plays with your browser's voice and can be opened again here.">Playable HTML<small>Plays anywhere; opens here for editing</small></a>
+              <a id="rvFile" title="The script, slide designs and finished page in one file you can send and open again">Module file<small>.h2m.json · this version</small></a>
+              <a id="rvFileAll" title="The same, with every version">Module file with history<small>.h2m.json · all versions</small></a>
+              <button type="button" id="rvYaml">View as YAML<small>Read or copy the module as text</small></button>
+            </div></details></div>
+        <dialog id="yamlView" aria-label="Module as YAML"><div class="yv-bar"><b>Module as YAML</b><span id="yvMeta"></span>
+          <button class="link" type="button" id="yvCopy">Copy</button><a class="link" id="yvSave">Download</a><button class="link" type="button" id="yvClose">Close</button></div>
+          <pre id="yvText" tabindex="0"></pre></dialog>
         <small class="rv-hint">Press Play to hear it with your browser's voice, or <b>Studio voice</b> for the voice the video will use. ⤢ goes full screen. The video follows exactly this.</small>
       </div>
       <aside class="rv-side"><h4>Slides</h4><ol id="rvSlides"></ol></aside>

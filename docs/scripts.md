@@ -202,6 +202,20 @@ Two ways to use a file that comes back:
   Studio's own version of the slides, not your hand edits.
 - **Create video** converts any module file exactly as it is, hand edits included.
 
+### The module file
+
+**Share > Module file** saves the whole module as one text file, `Title.h2m.json`: the script, every slide's design, the finished
+page, the pronunciations it uses and the brand colours and fonts it was made with. Send it to a colleague and they open it with
+**Open a module file** on the Write page; they get the same script and slides, editable, without needing your computer.
+**Module file with history** includes every version, so they open it with the full history and the same version current.
+
+**View as YAML** shows the same data as text you can read, copy or download (`.h2m.yaml`). Either form opens in the Studio, so a
+YAML file can be edited by hand. The file carries a checksum: if it doesn't match when opened (you edited it), you're told, and the
+file is still opened, with the script in the file as the one that counts. An undesigned script exports and opens too.
+
+Files from a newer Studio are refused with a message to update. The brand in a file is a record of how it was made; opening a file
+never changes your own brand or overwrites your pronunciations (only words you don't have yet are added).
+
 ## Your brand
 
 Open **Settings** to set the look of every module. A fresh install starts with the bundled ThoughtSpot brand (colours, logos,

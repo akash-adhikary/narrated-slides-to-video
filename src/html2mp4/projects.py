@@ -58,18 +58,27 @@ def set_script(pid, script_text):
     return p
 
 
-def save_version(pid, html, slides, note, cost=0.0, issues=(), script_text=None, mode="design"):
+def save_version(pid, html, slides, note, cost=0.0, issues=(), script_text=None, mode="design", at=None):
     """Store a new version and make it current. `slides` is the per-slide design (None for the basic layout)."""
     p = _read(pid); n = (p["versions"][-1]["n"] + 1) if p["versions"] else 1
     f = folder(pid); (f / "versions").mkdir(exist_ok=True)
     (f / "versions" / f"v{n}.html").write_text(html, encoding="utf-8")
     (f / "versions" / f"v{n}.json").write_text(json.dumps({"slides": slides, "script": script_text if script_text is not None else p["script"]}))
     (f / "module.html").write_text(html, encoding="utf-8")
-    p["versions"].append({"n": n, "at": time.time(), "note": note, "cost": round(cost, 3), "mode": mode,
+    p["versions"].append({"n": n, "at": at or time.time(), "note": note, "cost": round(cost, 3), "mode": mode,
                           "issues": [i if isinstance(i, dict) else i.to_dict() for i in issues]})
     p["current"] = n; p["updated"] = time.time()
     if script_text is not None: p["script"] = script_text; (f / "script.txt").write_text(script_text)
     _write(p)
+    return p
+
+
+def set_current(pid, n):
+    """Make version n the one the project shows (and the video is made from), without adding a version."""
+    p = _read(pid); html = version_html(pid, n)
+    if html is None: raise ValueError("That version doesn't exist.")
+    (folder(pid) / "module.html").write_text(html, encoding="utf-8")
+    p["current"] = int(n); _write(p)
     return p
 
 

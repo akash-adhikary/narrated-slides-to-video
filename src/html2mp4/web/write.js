@@ -47,7 +47,9 @@ $("#wImport").addEventListener("change", async e => {
   try{
     const r = await api("/api/projects/import", {method: "POST", body: fd});
     await openProject(r.project); loadModules(); $("#cardReview").scrollIntoView({behavior: "smooth"});
-    toast(r.edited ? "Opened. This file was changed outside the Studio, so later redesigns start from the Studio's own version of the slides."
+    toast(r.versions > 1 ? `Opened with its ${r.versions} versions.` + (r.edited ? " The file was edited by hand." : "")
+      : r.designed === false ? "Opened the script. Design the slides when you're ready."
+      : r.edited ? "Opened. This file was changed outside the Studio, so later redesigns start from the Studio's own version of the slides."
       : r.pronunciations_added ? `Opened, and added ${r.pronunciations_added} pronunciation${r.pronunciations_added > 1 ? "s" : ""} from the file.` : "Opened. You can keep refining it here.");
   }catch(err){ toast(err.message); }
 });
@@ -183,7 +185,26 @@ function showFrame(){
   f.src = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}&t=${Date.now()}`;
   $("#rvOpen").href = `/api/projects/${W.project}/module.html?v=${W.version}&studio=${encodeURIComponent(W.project)}`;
   $("#rvDownload").href = `/api/projects/${W.project}/download?v=${W.version}`;
+  $("#rvFile").href = `/api/projects/${W.project}/export?v=${W.version}`;
+  $("#rvFileAll").href = `/api/projects/${W.project}/export?v=${W.version}&history=true`;
+  $("#rvShare").open = false;
 }
+$("#rvShare").addEventListener("click", e => { if(e.target.closest(".share-menu a, .share-menu button")) setTimeout(() => { $("#rvShare").open = false; }, 0); });
+addEventListener("click", e => { const d = $("#rvShare"); if(d.open && !d.contains(e.target)) d.open = false; });
+$("#rvYaml").addEventListener("click", async () => {
+  const url = `/api/projects/${W.project}/export?v=${W.version}&format=yaml`, dlg = $("#yamlView");
+  $("#yvText").textContent = "Loading…"; $("#yvMeta").textContent = ""; $("#yvSave").href = url;
+  dlg.showModal();
+  try{
+    const text = await (await fetch(url + "&inline=true")).text();
+    $("#yvText").textContent = text; $("#yvMeta").textContent = `${text.split("\n").length.toLocaleString()} lines`;
+  }catch(err){ $("#yvText").textContent = "Couldn't load it."; }
+});
+$("#yvCopy").addEventListener("click", async () => {
+  try{ await navigator.clipboard.writeText($("#yvText").textContent); toast("Copied."); }catch(err){ toast("Couldn't copy. Select the text and copy it."); }
+});
+$("#yvClose").addEventListener("click", () => $("#yamlView").close());
+$("#yamlView").addEventListener("click", e => { if(e.target === e.currentTarget) e.currentTarget.close(); });
 $("#rvSlides").addEventListener("click", e => {
   const b = e.target.closest("button"); if(!b) return;
   $("#rvFrame").contentWindow.postMessage({html2mp4: "go", pos: W.rows[+b.dataset.i].last}, "*");
