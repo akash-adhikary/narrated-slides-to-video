@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from html2mp4 import chat, ai, brandkit, cli, compose, config, design, modulefile, music as music_beds, projects, review, script, verify
+from html2mp4 import chat, ai, brandkit, cli, compose, config, design, media, modulefile, music as music_beds, projects, review, script, verify
 
 HOME = cli.CACHE / "studio"
 UPLOADS, PREVIEWS = HOME / "uploads", HOME / "previews"
@@ -509,11 +509,52 @@ class ChatIn(BaseModel):
     messages: list[dict]
     script: str = ""
     project_id: str | None = None
+    attachments: list[str] = []           # media-library ids of images attached to the last message
+
+
+def chat_images(body):
+    """Images Claude should see with this message: the attached ones, and up to two library images the message names."""
+    last = str(body.messages[-1].get("content", "")) if body.messages else ""
+    picks = [media.get(i) for i in body.attachments[:4]]
+    for it in media.listing():
+        if len(picks) >= 6: break
+        if it["id"] not in body.attachments and (it["name"].casefold() in last.casefold() or it["id"] in last) and it["format"] != "svg":
+            if sum(1 for p in picks if p and p["id"] not in body.attachments) < 2: picks.append(it)
+    out = []
+    for it in picks:
+        if it and it["format"] != "svg":
+            try: out.append((it["id"], it["name"], media.jpeg_for_claude(it)))
+            except Exception: pass
+    return out
+
+
+def run_image_ops(job, ops):
+    """Carry out the assistant's image edits in order ("previous" is the result of the one before). Each makes a new library item."""
+    done, prev, cost = [], None, 0.0
+    for k, op in enumerate(ops):
+        target = prev if op.get("asset") == "previous" else op.get("asset")
+        if not target: done.append({"op": op["op"], "error": "There was no earlier result to work on."}); continue
+        params = {k2: op[k2] for k2 in ("box", "format", "direction", "kind") if op.get(k2) is not None}
+        if op.get("size"): params["max"] = int(op["size"])
+        if op.get("degrees") is not None: params["degrees"] = int(op["degrees"])
+        if op["op"] == "crop" and not params.get("box"): done.append({"op": "crop", "error": "No area to keep was given."}); continue
+        try:
+            it, c = media.smart_edit(target, op["op"], params, op.get("name"), status=lambda t, k=k: job.update(stage=f"{t} ({k + 1} of {len(ops)})" if len(ops) > 1 else t))
+            if op.get("kind") in media.KINDS: it = media.update(it["id"], kind=op["kind"])
+            done.append({"op": op["op"], "item": media_view(it)}); prev = it["id"]; cost += c
+        except (media.MediaError, ai.AIError) as e: done.append({"op": op["op"], "error": str(e)}); prev = None
+        except Exception as e:  # noqa: BLE001
+            done.append({"op": op["op"], "error": f"{type(e).__name__}: {e}"}); prev = None
+    return done, cost
 
 
 def run_chat(job, body, designed, slides, module=None):
     try:
-        res = chat.turn(body.messages, body.script, designed, slides, on_reply=lambda t: job.update(reply=t), module=module)
+        res = chat.turn(body.messages, body.script, designed, slides, on_reply=lambda t: job.update(reply=t), module=module,
+                        library=media.catalog_text(), images=chat_images(body))
+        if res.get("image_ops"):
+            job.update(reply=res["reply"], stage="Editing images…")
+            res["media"], c = run_image_ops(job, res["image_ops"]); res["cost"] = round(res["cost"] + c, 4)
         job.update(status="done", result=res, reply=res["reply"])
     except ai.AIError as e:
         job.update(status="failed", error=str(e))
@@ -836,9 +877,137 @@ def export_module(pid: str, format: str = "json", history: bool = False, v: int 
     try: doc = modulefile.build(pid, version=v, history=history)
     except modulefile.ModuleFileError as e: raise HTTPException(404, str(e))
     body = modulefile.dumps(doc, format)
+    if inline:                                 # reading, not downloading: an embedded image is a line, not pages of encoded data
+        body = re.sub(r"data:(image|font)/[\w.+-]+;base64,[A-Za-z0-9+/=]{200,}", lambda m: f"<embedded {m.group(1)}, {len(m.group(0)) * 3 // 4 // 1024} KB>", body)
     head = {"Cache-Control": "no-store"}
     if not inline: head["Content-Disposition"] = attachment(modulefile.filename(doc["name"], format))
     return Response(body, media_type="text/plain; charset=utf-8" if inline else ("application/x-yaml" if format == "yaml" else "application/json"), headers=head)
+
+
+# ---------------------------------------------------------------- the media library
+
+media_jobs = {}                       # id -> an edit running in the background (removing a background can take a while the first time)
+
+
+def media_view(it): return {**it, "url": f"/api/media/{it['id']}/file", "preview": f"/api/media/{it['id']}/preview"}
+
+
+@app.get("/api/media")
+def list_media(): return {"items": [media_view(i) for i in media.listing()], "kinds": list(media.KINDS)}
+
+
+def _describe_later(ids):
+    def run():
+        for iid in ids:
+            try: media.describe(iid)
+            except Exception: pass                                     # a description is a nicety; the image is there either way
+    if config.api_key_status()["set"]: threading.Thread(target=run, daemon=True).start()
+
+
+@app.post("/api/media")
+def upload_media(files: list[UploadFile] = File(...)):
+    """Add one or more images to the library. Claude writes a description of each in the background (when an API key is set)."""
+    out, errors = [], []
+    for f in files[:20]:
+        try: out.append(media.add(f.file.read(media.MAX_UPLOAD + 1), f.filename or "image"))
+        except media.MediaError as e: errors.append(f"{f.filename}: {e}")
+    if not out and errors: raise HTTPException(422, "; ".join(errors))
+    _describe_later([i["id"] for i in out])
+    return {"items": [media_view(i) for i in out], "errors": errors}
+
+
+def _item(iid):
+    it = media.get(iid)
+    if it is None: raise HTTPException(404, "That image isn't in the library.")
+    return it
+
+
+@app.get("/api/media/{iid}/file")
+def media_file(iid: str):
+    it = _item(iid)
+    return FileResponse(media.path(it), media_type=media.MIME[it["format"]], headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/media/{iid}/preview")
+def media_preview(iid: str):
+    """What to show for the image in the Studio: an animation plays (as animated WebP); anything else is a small still."""
+    it = _item(iid)
+    try: data, mime = media.export(it, "webp") if it.get("animated") else media.thumb(it, 480)
+    except media.MediaError as e: raise HTTPException(400, str(e))
+    return Response(data, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/media/{iid}/download")
+def media_download(iid: str, format: str | None = None):
+    it = _item(iid)
+    fmt = format or it["format"]
+    if fmt == it["format"] and not it.get("animated"): data, mime = media.path(it).read_bytes(), media.MIME[it["format"]]
+    else:
+        try: data, mime = media.export(it, fmt)
+        except media.MediaError as e: raise HTTPException(400, str(e))
+    ext = {"image/jpeg": "jpg"}.get(mime, mime.split("/")[1].replace("svg+xml", "svg"))
+    return Response(data, media_type=mime, headers={"Content-Disposition": attachment(f"{it['name']}.{ext}"), "Cache-Control": "no-store"})
+
+
+class MediaPatchIn(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    description: str | None = None
+
+
+@app.patch("/api/media/{iid}")
+def patch_media(iid: str, body: MediaPatchIn):
+    _item(iid)
+    try: return media_view(media.update(iid, body.name, body.kind, body.description))
+    except media.MediaError as e: raise HTTPException(400, str(e))
+
+
+@app.delete("/api/media/{iid}")
+def delete_media(iid: str):
+    media.delete(iid); return {"ok": True}
+
+
+class MediaEditIn(BaseModel):
+    op: str
+    params: dict = {}
+    name: str | None = None
+
+
+def run_media_edit(job, iid, body):
+    try:
+        it, cost = media.smart_edit(iid, body.op, body.params, body.name, status=lambda t: job.update(label=t))
+        job.update(status="done", item=media_view(it), cost=round(cost, 4), label="Done")
+    except (media.MediaError, ai.AIError) as e: job.update(status="failed", error=str(e))
+    except Exception as e:  # noqa: BLE001
+        job.update(status="failed", error=f"The edit didn't work ({type(e).__name__}: {e}).")
+
+
+@app.post("/api/media/{iid}/edit")
+def edit_media(iid: str, body: MediaEditIn):
+    """Edit an image (crop, cut out, resize, convert, make it talk...). The result is a new library item; the original stays."""
+    _item(iid)
+    if body.op not in media.OPS: raise HTTPException(400, f"Unknown edit. Available: {', '.join(media.OPS)}.")
+    if body.op == "talk" and not body.params.get("mouth") and not config.api_key_status()["set"]:
+        raise HTTPException(400, "Finding the mouth needs Claude: add your Anthropic API key in Settings.")
+    jid = uuid.uuid4().hex[:10]
+    job = media_jobs[jid] = {"id": jid, "status": "running", "label": "Starting…", "created": time.time()}
+    threading.Thread(target=run_media_edit, args=(job, iid, body), daemon=True).start()
+    return {"id": jid}
+
+
+@app.get("/api/media/jobs/{jid}")
+def media_job(jid: str):
+    if jid not in media_jobs: raise HTTPException(404)
+    return media_jobs[jid]
+
+
+@app.post("/api/media/{iid}/describe")
+def describe_media(iid: str):
+    _item(iid)
+    if not config.api_key_status()["set"]: raise HTTPException(400, "Describing images needs an Anthropic API key. Add one in Settings.")
+    try: it, cost = media.describe(iid)
+    except (media.MediaError, ai.AIError) as e: raise HTTPException(400, str(e))
+    return media_view(it) | {"cost": cost}
 
 
 narrations = {}                       # id -> progress of a voice being made (only while it is being made)

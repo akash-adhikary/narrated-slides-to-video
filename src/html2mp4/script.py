@@ -8,6 +8,7 @@
     Show: Builds trust · Speeds growth     <- optional on-screen points (or "- point" lines)
     Note: use three icons                  <- optional design hint for the slide designer
     Hold: 3                                <- optional: seconds the finished slide stays up after its last sentence
+    Image: Spotter dog (talking)           <- optional: an image from the media library to show on this slide
     Say: Feedback is how teams get better. <- one narration step; elements can appear with it
     Say: Done well, it builds trust.
 
@@ -39,6 +40,7 @@ class Slide:
     screen: str = ""                                        # the author's description of what appears ("On screen:")
     timing: str = ""                                        # the author's intended window, e.g. "0:30 to 1:30"
     hold: float | None = None                               # extra seconds the finished slide stays up (None: the Studio's pacing setting)
+    images: list = dataclasses.field(default_factory=list)  # names of media-library images this slide should show ("Image:")
 
 
 @dataclasses.dataclass
@@ -57,7 +59,7 @@ class Module:
     def to_dict(self): return dataclasses.asdict(self)
 
 
-MARKER = re.compile(r"^(title|subtitle|say|show|note|hold)\s*:\s*(.*)$", re.I)
+MARKER = re.compile(r"^(title|subtitle|say|show|note|hold|image)\s*:\s*(.*)$", re.I)
 MAX_HOLD = 30.0
 
 
@@ -146,6 +148,9 @@ def parse(text, title=None, subtitle=None):
             if slide is None: raise ScriptError(f"Line {n}: '{kind.title()}:' belongs under a '## Slide title'.")
             if kind == "hold":
                 slide.hold = parse_hold(value, n); last = None
+            elif kind == "image":
+                if not value: raise ScriptError(f"Line {n}: 'Image:' needs the name of an image from the media library.")
+                slide.images += [p for p in SPLIT_SHOW.split(value) if p]; last = None
             elif kind == "show":
                 slide.show += [p for p in SPLIT_SHOW.split(value) if p]; last = ("show", slide)
             else:
@@ -195,6 +200,8 @@ def _parse_scenes(text, title, subtitle):
             slide.note = (slide.note + " " + mk.group(2)).strip(); in_screen = False; continue
         if mk and mk.group(1).lower() == "hold":
             slide.hold = parse_hold(mk.group(2), n); in_screen = False; continue
+        if mk and mk.group(1).lower() == "image":
+            slide.images += [p for p in SPLIT_SHOW.split(mk.group(2)) if p]; in_screen = False; continue
         if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
             slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
         in_screen = False

@@ -345,3 +345,60 @@ def test_a_version_has_its_own_address_and_back_undoes_the_switch(page, app):
     page.reload(); page.wait_for_selector("#verBar", state="visible")                                         # the link opens that exact version
     assert page.input_value("#wScript") == v1 and page.inner_text("#verLabel") == "Viewing version 1"
     page.goto(page.url.split("#")[0] + f"#write/{pid}/v9"); page.wait_for_function("document.querySelector('#toast').textContent.includes('version wasn')")
+
+
+def test_media_library_upload_open_edit_and_insert(page, app, tmp_path):
+    import io
+    from PIL import Image
+    im = Image.new("RGBA", (300, 200), (0, 0, 0, 0))
+    for x in range(75, 225):
+        for y in range(50, 150): im.putpixel((x, y), (20, 120, 220, 255))
+    f = tmp_path / "Blue badge.png"; im.save(f)
+    page.goto(app + "/#settings"); page.wait_for_selector("#cardMedia")
+    page.set_input_files("#mdFile", str(f)); page.wait_for_selector("#mdGrid .md-card")
+    assert "Blue badge" in page.inner_text("#mdGrid") and "Cut-out" in page.inner_text("#mdGrid")
+    page.click("#mdGrid .md-card"); page.wait_for_selector("#mdDlg[open]")
+    assert page.input_value("#mdName") == "Blue badge" and "transparent background" in page.inner_text("#mdMeta")
+    page.click("#mdDlg [data-op=trim]"); page.wait_for_function("document.querySelector('#mdName').value === 'Blue badge (trimmed)'")
+    assert "150×100" in page.inner_text("#mdMeta")
+    page.click("#mdCropGo"); box = page.locator("#mdImg").bounding_box()
+    page.mouse.move(box["x"] + 2, box["y"] + 2); page.mouse.down(); page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=5); page.mouse.up()
+    page.click("#mdCropApply"); page.wait_for_function("document.querySelector('#mdName').value.includes('(cropped)')")
+    assert page.get_attribute("#mdDl a", "href").endswith("format=png")
+    page.click("#mdClose")
+    page.goto(app + "/#write"); page.wait_for_selector("#wStart")
+    new_module(page, "Media test"); page.fill("#wScript", DRAFT); page.focus("#wScript"); page.keyboard.press("Control+End")
+    page.click("#wImgPick summary"); page.wait_for_selector("#wImgMenu .ip-row")
+    page.locator("#wImgMenu .ip-row", has_text="Blue badge (trimmed)").first.click()
+    assert "## Your first day\nImage: Blue badge (trimmed)" in page.input_value("#wScript")
+
+
+def test_attaching_an_image_in_the_assistant(page, app, tmp_path):
+    from PIL import Image
+    f = tmp_path / "Spot.png"; Image.new("RGB", (120, 80), (200, 50, 50)).save(f)
+    page.click("#aiOrb"); page.set_input_files("#aiFile", str(f))
+    page.wait_for_selector("#aiAtt:not([hidden]) .ai-chip-img")
+    assert "Spot" in page.inner_text("#aiAtt") and page.get_attribute("#aiInput", "placeholder") == "Say what to do with it…"
+    send(page, "hello there")
+    page.wait_for_selector(".ai-msg.user .ai-msg-img"); assert page.is_hidden("#aiAtt")
+
+
+def test_the_studio_scripts_never_share_a_top_level_name():
+    """The page loads its scripts one after another into one global scope: a second `const x` stops the whole file from loading,
+    and a second `function x` silently replaces the first (the Create page's progress once updated the chat instead)."""
+    import pathlib, re
+    web = pathlib.Path(studio.__file__).parent / "web"
+    order = re.findall(r'<script src="/static/([\w-]+\.js)"', (web / "index.html").read_text())
+    seen = {}
+    for name in order:
+        for m in re.finditer(r"^(?:const|let|class|function|async function)\s+([A-Za-z_$][\w$]*)", (web / name).read_text(), re.M):
+            assert m.group(1) not in seen, f"{m.group(1)} is declared in both {seen[m.group(1)]} and {name}"
+            seen[m.group(1)] = name
+    assert len(order) >= 6 and "media.js" in order
+
+
+def test_every_page_loads_without_a_script_error(bare, app):
+    errors = []; bare.on("pageerror", lambda e: errors.append(str(e)))
+    for h in ("#write", "#create", "#settings", "#write"):
+        bare.goto(app + "/" + h); bare.wait_for_timeout(400)
+    assert errors == []

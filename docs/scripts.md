@@ -23,6 +23,38 @@ module. Esc or Cancel creates nothing.
 - What you type is **saved as you go** with the module, and so is your conversation with the assistant, so closing the tab loses
   nothing and the chat is there from any browser on this Studio.
 
+## Images: mascots, logos, photos
+
+**Settings > Media library** holds images any module can use: your mascot, logos, product icons, office photos. Upload PNG, JPG,
+WebP, GIF or SVG (or drop them on the card). Each image is cleaned on the way in: turned the right way up, hidden metadata such as a
+photo's GPS location removed, very large images scaled down, and SVGs checked for scripts. Claude writes a short description of each
+one (the slide designer reads it), which you can edit, along with its name and kind (mascot, logo, icon, photo, background).
+
+**Using an image on a slide.** Add an `Image:` line under the slide's heading, with the image's name:
+
+```
+## Meet your AI analyst
+Image: Spotter dog (talking)
+Say: Hi! I'm Spotter.
+```
+
+**Insert image** above the script adds that line to the slide you're writing. The designer places the image (beside the content,
+never stretched, never over text) and may use one where it clearly fits, such as the mascot on the opening slide. The image is put
+into the module itself, so the playable HTML, the module file and every version carry the exact image they were made with.
+
+**Editing an image.** Open it in the library. Every edit makes a new image and keeps the original:
+
+- **Remove background**: Claude finds the subject and a segmentation model on this computer cuts it out. The model (Segment
+  Anything, about 375 MB) downloads the first time it's used. Nothing is sent anywhere except the small preview Claude looks at.
+- **Make it talk**: Claude finds the mouth and the jaw opens and closes. On a slide the mouth moves only while the narrator is
+  speaking, and rests in the pauses (in the player and in the video). Works best on a cut-out.
+- **Gentle float**, **Crop** (drag a box), **Trim edges**, **Make square**, **Rotate**, **Flip**, **Shrink**, **To PNG / JPG**.
+- **Download** as PNG, JPG, WebP or GIF (an animation as an animated GIF or WebP).
+
+**With the assistant.** Attach an image (the paperclip, or paste or drop it into the chat) and say what you want: "cut the dog out
+and make him talk", "crop to the logo", "put Spotter on the first and last slides". The assistant can see what you attach, makes the
+edits, and shows the new images in the chat. It can't draw new pictures or change what is in one, beyond removing the background.
+
 ## Building the script with AI
 
 You don't have to write the script yourself. Press the glowing **Build with AI** button at the bottom right of the Write page (or

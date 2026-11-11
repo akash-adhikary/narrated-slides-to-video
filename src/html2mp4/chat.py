@@ -20,8 +20,16 @@ SCHEMA = {"type": "object", "properties": {
     "visual_requests": {"type": "array", "items": {"type": "object", "properties": {
         "slides": {"type": "array", "items": {"type": "string"}}, "request": {"type": "string"}},
         "required": ["slides", "request"], "additionalProperties": False}},
-    "suggestions": {"type": "array", "items": {"type": "string"}}},
-    "required": ["reply", "script", "edits", "summary", "visual_requests", "suggestions"], "additionalProperties": False}
+    "suggestions": {"type": "array", "items": {"type": "string"}},
+    "image_ops": {"type": "array", "items": {"type": "object", "properties": {
+        "asset": {"type": "string"},
+        "op": {"type": "string", "enum": ["crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob"]},
+        "box": {"type": ["array", "null"], "items": {"type": "number"}},
+        "size": {"type": ["number", "null"]}, "degrees": {"type": ["number", "null"]},
+        "direction": {"type": ["string", "null"]}, "format": {"type": ["string", "null"]},
+        "name": {"type": ["string", "null"]}, "kind": {"type": ["string", "null"]}},
+        "required": ["asset", "op", "box", "size", "degrees", "direction", "format", "name", "kind"], "additionalProperties": False}}},
+    "required": ["reply", "script", "edits", "summary", "visual_requests", "suggestions", "image_ops"], "additionalProperties": False}
 
 SYSTEM = """You are the script assistant inside a studio that turns a script into a narrated slide video. You talk with a person
 (often in HR, L&D or enablement, not a professional writer) and help them build, then refine, the script. Slides are designed
@@ -80,6 +88,25 @@ The context may begin with the module's name. That name is the person's own labe
 "08 · Interviewing candidates"); it is not the video's title and not part of the script. Refer to the module by that name when it
 helps, never invent a different one, and don't rename it or put it in the script unless they ask. The video's title is the `Title:`
 line in the script.
+
+# Images (the media library)
+The context lists the media library: images the person has uploaded (mascots, logos, icons, office photos), each with an ID, a
+name and a description. You may also see images the person attached to their message.
+- To show an image on a slide, add `Image: NAME` under that slide's heading, with the image's exact name from the library (several
+  are separated by ` · `). Do it when asked, or suggest it where it clearly fits (the mascot greeting on the first slide, an office
+  photo when that office is mentioned). The designer places it. A character marked "talks" moves its mouth while the narrator speaks:
+  it works as the presenter.
+- To edit an image, use `image_ops`. Each op makes a NEW image in the library (the original stays). Ops: `crop` (box = the area to
+  keep), `trim` (cut away transparent edges), `resize` (size = longest side in pixels), `rotate` (degrees), `flip` (direction
+  "horizontal" or "vertical"), `remove_background` (box = the subject to keep, or null to let the studio find it), `convert`
+  (format "png", "jpg" or "webp"), `pad` (make it square with a small margin), `talk` (makes a character's mouth move while the
+  narrator speaks; box null: the studio finds the mouth; best on a cut-out, so remove the background first), `bob` (a gentle floating
+  loop). Boxes are [left, top, right, bottom] as fractions of the image (0 to 1). `asset` is the image's ID, or "previous" for the
+  result of the op before it, so you can chain (remove_background, then talk on "previous"). Give each result a short clear `name`,
+  and set `kind` (mascot, logo, icon, photo, background, other) when it changes. Unused fields are null.
+- An attached image is already in the library (its ID is given). Say what you did in one line; the new images appear in the chat.
+- You can't draw new pictures or change what is in one (no generating, recolouring, adding or removing objects other than the
+  background). Say so plainly and offer what you can do. Every image can be downloaded as PNG, JPG, WebP or GIF from Settings > Media.
 
 # Slides that already exist
 The context says whether the slides are designed, and lists the slide ids (s0 is the title slide, s1 the first content slide, and so
@@ -222,7 +249,8 @@ def diff(old_text, new_text):
     return rows
 
 
-def turn(messages, current_script="", designed=False, slides=None, on_reply=None, call=None, module=None):
+def turn(messages, current_script="", designed=False, slides=None, on_reply=None, call=None, module=None, library="", images=()):
+    """`library`: the media library as text; `images`: [(id, name, jpeg bytes)] the person attached (or named), for Claude to see."""
     """One assistant turn. `messages` is the conversation so far ([{role, content}], the last one from the person).
     Returns {reply, script, summary, visual_requests, suggestions, changes, cost}; `script` has been parsed and is safe to use."""
     call = call or ai.structured
@@ -233,7 +261,12 @@ def turn(messages, current_script="", designed=False, slides=None, on_reply=None
     while msgs and msgs[0]["role"] != "user": msgs.pop(0)
     ctx = context(current_script, designed, slides or {}, module)
     last = msgs[-1]
-    msgs[-1] = {"role": "user", "content": f"{ctx}\n\n---\nThe person says:\n{last['content']}"}
+    if library: ctx += "\n\nThe media library:\n" + library
+    if images: ctx += "\n\nImages with this message (shown above, in this order): " + "; ".join(f"“{n}” (ID {i})" for i, n, _ in images)
+    text = f"{ctx}\n\n---\nThe person says:\n{last['content']}"
+    import base64
+    blocks = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(j).decode()}} for _, _, j in images]
+    msgs[-1] = {"role": "user", "content": blocks + [{"type": "text", "text": text}] if blocks else text}
     cost, answer, bad = 0.0, None, None
     for attempt in range(2):
         def on_text(t): on_reply and on_reply(partial_reply(t))
@@ -264,4 +297,5 @@ def turn(messages, current_script="", designed=False, slides=None, on_reply=None
         if designed and v.get("request", "").strip(): vr.append({"slides": sl, "request": v["request"].strip()})
     return {"reply": answer["reply"].strip(), "script": answer["script"], "summary": [s for s in answer.get("summary", []) if s][:6] if answer["script"] else [],
             "visual_requests": vr, "suggestions": [s.strip() for s in answer.get("suggestions", []) if s.strip()][:3],
-            "changes": diff(current_script, answer["script"]) if answer["script"] else [], "cost": round(cost, 4)}
+            "changes": diff(current_script, answer["script"]) if answer["script"] else [], "cost": round(cost, 4),
+            "image_ops": [op for op in (answer.get("image_ops") or []) if isinstance(op, dict) and op.get("op") and op.get("asset")][:6]}

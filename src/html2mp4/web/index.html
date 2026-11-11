@@ -67,6 +67,8 @@
       <button class="link" type="button" id="wExample">Insert an example</button>
       <label class="link" for="wFile">Open a text file</label><input type="file" id="wFile" accept=".txt,.md,text/plain" hidden>
       <label class="link" for="wImport" title="A module file (.html, .h2m.json or .h2m.yaml) you or a colleague downloaded from the Studio">Open a module file</label><input type="file" id="wImport" accept=".html,.htm,.json,.yaml,.yml,text/html,application/json" hidden>
+      <details class="share imgpick" id="wImgPick"><summary class="link" title="Put an image from your media library on the slide you're writing">Insert image</summary>
+        <div class="share-menu ip-menu" id="wImgMenu"></div></details>
       <button class="link" type="button" id="wHelp">How to write it</button>
       <small class="saved" id="wSaved" aria-live="polite"></small>
     </div>
@@ -329,6 +331,16 @@ Note: three cards, left to right</pre>
     </div>
   </section>
 
+  <section class="card" id="cardMedia" aria-labelledby="hMedia">
+    <div class="card-h"><h2 id="hMedia">Media library</h2><p>Images any module can use</p></div>
+    <div class="md-drop" id="mdDrop">
+      <input type="file" id="mdFile" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg" multiple hidden>
+      <label for="mdFile" class="btn-2">Upload images</label><span>or drop them here: mascots, logos, icons, office photos. PNG, JPG, WebP, GIF or SVG.</span>
+    </div>
+    <div class="md-grid" id="mdGrid"></div>
+    <p class="fine">Put an image on a slide with an <code>Image:</code> line in the script (or <b>Insert image</b> above the script), or just ask the assistant. Open an image to cut out its background, make a character talk, crop it, convert it or download it as PNG, JPG, WebP or GIF. Edits make a new image; the original stays.</p>
+  </section>
+
   <section class="card" aria-labelledby="hBrand">
     <div class="card-h"><h2 id="hBrand">Brand kit</h2><p>Applied to every module designed from a script</p></div>
 
@@ -411,6 +423,38 @@ Note: three cards, left to right</pre>
   </form>
 </dialog>
 
+<dialog class="mddlg" id="mdDlg" aria-labelledby="mdName">
+  <div class="md-d">
+    <div class="md-stage" id="mdStage"><img id="mdImg" alt=""><div class="md-crop" id="mdCrop" hidden></div></div>
+    <div class="md-side">
+      <label class="md-l">Name<input id="mdName" maxlength="60" autocomplete="off"></label>
+      <label class="md-l">Kind<select id="mdKind"></select></label>
+      <label class="md-l">Description <small>(what the slide designer reads)</small><textarea id="mdDesc" rows="3" maxlength="400"></textarea></label>
+      <div class="md-meta" id="mdMeta"></div>
+      <div class="md-row"><button class="btn-2 sm" type="button" id="mdSave">Save</button><button class="link" type="button" id="mdDescribe" title="Claude looks at the image and describes it">Describe with Claude</button></div>
+      <h4>Edit <small>each edit makes a new image</small></h4>
+      <div class="md-acts">
+        <button class="link" type="button" data-op="remove_background">Remove background</button>
+        <button class="link" type="button" data-op="talk" title="Claude finds the mouth; it then moves while the narrator speaks">Make it talk</button>
+        <button class="link" type="button" data-op="bob">Gentle float</button>
+        <button class="link" type="button" id="mdCropGo">Crop…</button>
+        <button class="link" type="button" data-op="trim">Trim edges</button>
+        <button class="link" type="button" data-op="pad">Make square</button>
+        <button class="link" type="button" data-op="rotate" data-p='{"degrees":90}'>Rotate</button>
+        <button class="link" type="button" data-op="flip" data-p='{"direction":"horizontal"}'>Flip</button>
+        <button class="link" type="button" data-op="resize" data-p='{"max":1024}'>Shrink to 1024 px</button>
+        <button class="link" type="button" data-op="convert" data-p='{"format":"png"}'>To PNG</button>
+        <button class="link" type="button" data-op="convert" data-p='{"format":"jpg"}'>To JPG</button>
+      </div>
+      <div class="md-crop-bar" id="mdCropBar" hidden><span>Drag on the picture to choose the area to keep.</span><button class="btn-2 sm" type="button" id="mdCropApply" disabled>Crop</button><button class="link" type="button" id="mdCropCancel">Cancel</button></div>
+      <p class="md-status" id="mdStatus" aria-live="polite"></p>
+      <h4>Download</h4>
+      <div class="md-acts" id="mdDl"></div>
+      <div class="md-row end"><button class="link rm" type="button" id="mdDelete">Delete</button><button class="link" type="button" id="mdClose">Close</button></div>
+    </div>
+  </div>
+</dialog>
+
 <div class="ai" id="ai">
   <button class="ai-orb" id="aiOrb" type="button" aria-label="Open the script assistant" aria-expanded="false" aria-controls="aiPanel">
     <span class="ai-orb-glow" aria-hidden="true"></span><span class="ai-orb-ring" aria-hidden="true"></span>
@@ -429,6 +473,9 @@ Note: three cards, left to right</pre>
     <div class="ai-log" id="aiLog" role="log" aria-live="polite" aria-label="Conversation"></div>
     <div class="ai-chips" id="aiChips"></div>
     <form class="ai-form" id="aiForm" autocomplete="off">
+      <div class="ai-att" id="aiAtt" hidden></div>
+      <input type="file" id="aiFile" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg" multiple hidden>
+      <label class="ai-clip" for="aiFile" title="Attach images (or paste or drop them here)" aria-label="Attach images"><svg viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.4 8.4a1.7 1.7 0 01-2.4-2.4l7.7-7.7"/></svg></label>
       <textarea id="aiInput" rows="1" placeholder="Tell me what to write or change…" aria-label="Message to the assistant"></textarea>
       <button type="button" class="ai-mic" id="aiMic" aria-label="Speak your message" title="Speak" hidden><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/></svg></button>
       <button type="submit" class="ai-send" id="aiSend" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button>
@@ -444,5 +491,6 @@ Note: three cards, left to right</pre>
 <script src="/static/write.js"></script>
 <script src="/static/chat.js"></script>
 <script src="/static/settings.js"></script>
+<script src="/static/media.js"></script>
 </body>
 </html>

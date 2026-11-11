@@ -180,17 +180,17 @@ function view(which){
   ["#cardUpload","#cardVoice","#cardMusic"].forEach(s => $(s).classList.toggle("locked", which === "prog" || (s !== "#cardUpload" && !state.upload)));
 }
 function track(j){
-  state.job = j.id; view("prog"); render(j);
+  state.job = j.id; view("prog"); renderJob(j);
   $("#cardCreate").scrollIntoView({behavior:"smooth", block:"center"});
   clearInterval(track._t);
   track._t = setInterval(async () => {
     try{
-      const x = await api(`/api/jobs/${j.id}`); render(x);
+      const x = await api(`/api/jobs/${j.id}`); renderJob(x);
       if(["done","failed","cancelled"].includes(x.status)){ clearInterval(track._t); loadLibrary(); }
     }catch{}
   }, 800);
 }
-function render(j){
+function renderJob(j){
   $("#progTitle").textContent = j.title;
   const p = Math.round((j.progress || 0) * 100);
   $("#pct").innerHTML = `${p}<small>%</small>`;

@@ -146,7 +146,7 @@ def static_issues(slide_id, inner_html, css, banned=()):
     """Things that are never allowed in a design (scripts, outside links, animations) found without rendering."""
     problems = []
     for pattern, why in [
-        (r"<\s*script", "scripts aren't allowed"), (r"<\s*(iframe|object|embed|link|meta|base|form|img|video|audio)\b", "that element isn't allowed (draw with HTML and SVG)"),
+        (r"<\s*script", "scripts aren't allowed"), (r"<\s*(iframe|object|embed|link|meta|base|form|video|audio)\b", "that element isn't allowed (draw with HTML and SVG)"),
         (r"\son\w+\s*=", "event handlers aren't allowed"), (r"(?:href|src|xlink:href)\s*=\s*[\"']?\s*(?:https?:)?//", "outside links aren't allowed"),
         (r"url\s*\(", "url() isn't allowed (use gradients and SVG shapes)"), (r"@import|@font-face", "@import and @font-face aren't allowed"),
         (r"@keyframes|\banimation(?:-[a-z-]+)?\s*:", "your own animations aren't allowed: use data-fx, draw, count and the amb-* classes"),
@@ -154,6 +154,9 @@ def static_issues(slide_id, inner_html, css, banned=()):
         (r"position\s*:\s*fixed", "position:fixed isn't allowed"), (r"javascript:", "javascript: links aren't allowed"),
     ]:
         if re.search(pattern, inner_html + "\n" + css, re.I): problems.append(f"{slide_id}: {why}.")
+    for tag in re.findall(r"<\s*img\b[^>]*>", inner_html, re.I):                    # only images from the media library, by id
+        if not re.search(r"\bdata-asset\s*=", tag) or re.search(r"\ssrc\s*=", tag):
+            problems.append(f'{slide_id}: an image must come from the media library as <img data-asset="id" alt="…">, with no src.')
     for tag in re.findall(r"<[^>]*\bclass\s*=\s*[\"'][^\"']*\bdraw\b[^>]*>", inner_html):
         if not re.search(r'pathLength\s*=\s*["\']1["\']', tag): problems.append(f"{slide_id}: an element with class draw needs pathLength=\"1\".")
     for rule in re.findall(r"([^{}]+)\{", css):

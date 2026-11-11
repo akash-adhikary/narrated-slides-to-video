@@ -56,7 +56,7 @@ def test_invented_words_are_a_warning_not_an_error():
 
 
 @pytest.mark.parametrize("html, css, expect", [
-    ("<script>x()</script>", "", "scripts"), ('<img src="a.png">', "", "isn't allowed"), ('<a href="https://x.y">x</a>', "", "outside links"),
+    ("<script>x()</script>", "", "scripts"), ('<img src="a.png">', "", "must come from the media library"), ('<a href="https://x.y">x</a>', "", "outside links"),
     ('<div onclick="x()">x</div>', "", "event handlers"), ("<p>x</p>", "#s1 p{animation:a 1s}", "animations"),
     ("<p>x</p>", "p{color:red}", "must start with #s1"), ("<p>x</p>", "#s1 p{background:url(a.png)}", "url()"),
 ])

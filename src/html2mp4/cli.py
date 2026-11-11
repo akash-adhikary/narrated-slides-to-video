@@ -125,7 +125,7 @@ PAGE_JS = """
       items.forEach((list, i) => list.forEach(e => e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci))));
       seek(t);
     },
-    frame: t => seek(t),
+    frame: (t, speaking) => { stage.classList.toggle('speaking', !!speaking); seek(t); },   // a talking character moves only while the voice does
   };
 }
 """
@@ -317,7 +317,7 @@ def x264(crf, fast=False, threads=0):
 
 
 def render_segment(job):
-    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause, times = job
+    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause, times, speech = job
     if nice: os.nice(nice)              # background renders yield the CPU to interactive work (previews)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -341,7 +341,7 @@ def render_segment(job):
             while ei < len(events) and events[ei][0] <= t:
                 et, si, ci = events[ei]
                 page.evaluate(f"__html2mp4.show({si},{ci},{et})"); ei += 1
-            page.evaluate(f"__html2mp4.frame({t})")
+            page.evaluate(f"__html2mp4.frame({t}, {'true' if any(a <= t < b for a, b in speech) else 'false'})")
             # CDP ignores the emulated device scale unless the clip carries it explicitly
             shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True, "clip": clip})
             import base64; png = base64.b64decode(shot["data"])
@@ -355,9 +355,10 @@ def render_segment(job):
 
 
 def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False,
-                 cancel=None, nice=0, pausable=False, times=None):
-    nframes = int(round(total * FPS))
-    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times]).encode()).hexdigest()
+                 cancel=None, nice=0, pausable=False, times=None, speech=()):
+    """`speech`: [(start, end)] seconds when the narrator is speaking (a talking character moves only then)."""
+    nframes = int(round(total * FPS)); speech = [(round(a, 3), round(b, 3)) for a, b in speech]
+    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times, speech]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
     if video.exists() and keyfile.exists() and keyfile.read_text() == key:
         log("video unchanged — reusing cached render"); return video
@@ -372,7 +373,7 @@ def render_video(html, ids, events, total, work, workers, progress=lambda f: Non
         q, stop, pause = mgr.Queue(), mgr.Event(), mgr.Event()
         futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
                                               str(segdir / f"{i:03}.mp4"), q, size, crf, fast, stop, threads, nice,
-                                              pause if pausable else None, times))
+                                              pause if pausable else None, times, speech))
                    for i in range(workers)]
         done = 0
         while not all(f.done() for f in futures):
@@ -579,7 +580,8 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
         events, clips, total = timeline_for(scenes)
     step("layout")
     video = render_video(html, ids, events, total, work, workers, step("frames"), cancel=cancel, nice=nice, pausable=pausable,
-                         size=QUALITIES[quality], fast=bool(preview_seconds), times=times)
+                         size=QUALITIES[quality], fast=bool(preview_seconds), times=times,
+                         speech=[(t, t + len(a) / TTS_SR) for t, a, _ in clips])
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
     step("finish")

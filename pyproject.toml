@@ -38,6 +38,7 @@ dependencies = [
     "pypdf>=5",
     "pillow>=10",
     "pyyaml>=6",
+    "transformers>=4.40",                  # background removal (Segment Anything); already needed by the voice
 ]
 
 [project.optional-dependencies]

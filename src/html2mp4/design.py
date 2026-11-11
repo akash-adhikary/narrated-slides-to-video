@@ -77,9 +77,21 @@ Style text with the t-* classes. Text must sit fully inside its shape. Give each
   narration sentences onto the slide. Never use a banned term.
 - Do not draw the brand logo or footer; they are added automatically.
 
+# Images from the media library
+The brand's own images (mascots, logos, product icons, office photos) may be listed under "Media library" below. They are the
+only pictures you can use: `<img data-asset="ID" alt="what it shows" class="...">` with an ID from that list and no src.
+- A slide whose script says `Image: NAME` must show that image. Otherwise use one only where it clearly helps the idea (a mascot
+  greeting on the opening slide or cheering at the end, an office photo when the narration names that office). Most slides need none.
+- Never draw your own version of a library image, and never use an ID that isn't listed.
+- Size images with CSS width or height only, so they keep their proportions; never stretch them. Keep them clear of text: put a
+  character beside the content (a column of its own, or a corner), not behind it. A transparent cut-out can stand on the slide
+  background; an opaque photo sits in a card or panel with rounded corners.
+- An image marked "talks" is a character whose mouth moves while the narrator speaks: use it as the presenter (beside the text,
+  facing the content). It can take data-c like any element; don't add data-fx="pop" to it, a gentle entrance reads better.
+
 # Technical limits
-No scripts, event handlers, external links or fonts, images, `url()`, `@import`, your own animations or `@keyframes` (use the
-motion kit), and no `position:fixed`. Every CSS selector must start with the slide's id (e.g. `#s2 .card{...}`).
+No scripts, event handlers, external links or fonts, `url()`, `@import`, your own animations or `@keyframes` (use the motion kit),
+no images except library ones as above, and no `position:fixed`. Every CSS selector must start with the slide's id (e.g. `#s2 .card{...}`).
 
 Return one entry per requested slide, using the ids you were given, and a one-line `summary` of its layout."""
 
@@ -234,6 +246,7 @@ def _scenes_text(module, ids):
         if s.show: lines.append("Exact on-screen text (use verbatim): " + " | ".join(f"“{x}”" for x in s.show))
         if s.screen: lines.append(f"The author's description of what should be on screen: {s.screen}")
         if s.note: lines.append(f"Design note: {s.note}")
+        if s.images: lines.append("Show these images from the media library: " + ", ".join(s.images))
         lines.append("Narration steps:")
         lines += [f"  {i}: {t}" for i, t in enumerate(s.say)]
         out.append("\n".join(lines))
@@ -358,7 +371,10 @@ def design(module, brand, *, glossary=None, reference=None, previous=None, only=
     only = [i for i in (only or ids) if i in ids]
     slides = {k: dict(v) for k, v in (previous or {}).items() if k in ids}
     run = Run(progress, activity, thought)
+    from html2mp4 import media
     brand_text = _brand_text(brand, glossary)
+    library = media.catalog_text()
+    if library: brand_text += "\nMedia library (the only images you may use, by ID):\n" + library + "\n"
     ref = _digest(reference) if reference else ""
     banned = glossary.get("banned", [])
     # The brand, its rules and the reference module are the same on every call, so they sit in the cached system prompt
@@ -493,8 +509,12 @@ def _check(module, brand, slides, banned, motion="lively", script_text=None, glo
     """Assemble the module and inspect it. Returns (html, issues, screenshots)."""
     ids = slide_ids(module)
     issues = []
+    from html2mp4 import media
+    known = {i["id"] for i in media.listing()}
     for sid in ids:
         if sid not in slides: issues.append(verify.Issue(sid, 0, "missing", "error", f"{sid} has not been designed yet.")); continue
+        for iid in media.asset_ids(slides[sid]["html"]):
+            if iid not in known: issues.append(verify.Issue(sid, 0, "rule", "error", f"{sid}: the image “{iid}” isn't in the media library; use an ID from the list."))
         for msg in verify.static_issues(sid, slides[sid]["html"], slides[sid]["css"], banned):
             issues.append(verify.Issue(sid, 0, "rule", "error", msg))
     if any(i.kind == "missing" for i in issues): return "", issues, {}

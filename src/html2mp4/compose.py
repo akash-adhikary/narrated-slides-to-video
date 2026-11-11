@@ -67,7 +67,8 @@ def fonts_link(brand, covered=()):
 
 
 def theme_css(brand):
-    return _theme(brand) + MOTION_CSS + PLAYER_CSS
+    from html2mp4 import media
+    return _theme(brand) + MOTION_CSS + media.SPRITE_CSS + PLAYER_CSS
 
 
 def _theme(brand):
@@ -299,7 +300,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
   var noticeEl = $('notice'), noticeTimer = null;
   function notice(text, ms){ clearTimeout(noticeTimer); noticeEl.textContent = text || ''; noticeEl.hidden = !text; if (text && ms) noticeTimer = setTimeout(function(){ notice(''); }, ms); }
   function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
-  function stopAudio(){ try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
+  function talking(on){ stage.classList.toggle('speaking', !!on); }     // a talking character (an animated image) moves only while the voice does
+  function stopAudio(){ talking(false); try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
   function dropPreload(){ if (nextAudio) { nextAudio.onerror = null; nextAudio = null; } }
 
   // ---- what is on screen at a step. live = while narrating: cued things wait for their word; otherwise they use an estimate.
@@ -350,8 +352,9 @@ PLAYER_JS = r"""/*h2m:player-js*/
     var text = flat[pos][2], u = new SpeechSynthesisUtterance(text);
     if (voice) { u.voice = voice; u.lang = voice.lang; } u.rate = rate;
     u.onboundary = function(ev){ if (token !== my) return; var ch = ev.charIndex || 0; cued.slice().forEach(function(e){ if (ch >= e._char) reveal(e); }); };
-    u.onend = function(){ if (token !== my) return; revealAll(); after(my); };
-    u.onerror = function(ev){ if (token !== my || ev.error === 'interrupted' || ev.error === 'canceled') return; revealAll(); after(my); };
+    u.onstart = function(){ if (token === my) talking(true); };
+    u.onend = function(){ if (token !== my) return; talking(false); revealAll(); after(my); };
+    u.onerror = function(ev){ if (token !== my || ev.error === 'interrupted' || ev.error === 'canceled') return; talking(false); revealAll(); after(my); };
     speechSynthesis.cancel(); try { speechSynthesis.resume(); } catch (e) {} speechSynthesis.speak(u);
   }
   function preload(){                              // fetch the next sentence while this one plays, so there is no wait between them
@@ -369,8 +372,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
       for (var i = 0; i + cue.length <= words.length; i++) { var ok = true; for (var k = 0; k < cue.length; k++) if (words[i + k][0] !== cue[k]) { ok = false; break; } if (ok) { at = Math.max(0, words[i][1] - LEAD); break; } }
       e._at = at;
     });
-    a.addEventListener('playing', function(){ started = true; retries = 0; clearTimeout(watchdog); });
-    a.onended = function(){ if (token !== my) return; revealAll(); after(my); };
+    a.addEventListener('playing', function(){ started = true; retries = 0; clearTimeout(watchdog); if (token === my) talking(true); });
+    a.onended = function(){ if (token !== my) return; talking(false); revealAll(); after(my); };
     a.onerror = function(){ if (token === my) studioFailed(my); };
     watchdog = setTimeout(function(){ if (token === my && !started) studioFailed(my); }, window.__h2mWatchdogMs || 7000); timers.push(watchdog);   // never wait forever for a sound that isn't coming
     var pr = a.play();
@@ -407,8 +410,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
     var text = flat[pos][2];
     if (mode === 'studio' && studio) return playStudio(my);
     if (window.speechSynthesis && voice) { armEstimate(text, my, 1.7); return speakBrowser(my); }
-    armEstimate(text, my, 1);                                                  // no voices available: silent, paced by reading speed
-    timers.push(setTimeout(function(){ if (token === my) { revealAll(); after(my); } }, (text.split(/\s+/).length / 2.5 + 0.8) / rate * 1000));
+    armEstimate(text, my, 1); talking(true);                                   // no voices available: silent, paced by reading speed
+    timers.push(setTimeout(function(){ if (token === my) { talking(false); revealAll(); after(my); } }, (text.split(/\s+/).length / 2.5 + 0.8) / rate * 1000));
   }
   function pause(){ playing = false; token++; clearTimers(); stopAudio(); ui(); }
   function resume(){ playing = true; if (pos >= flat.length - 1 && !cued.length) pos = 0; playStep(); }
@@ -606,7 +609,9 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
     sections = []
     if module.intro:
         sections.append(f'<section class="slide title-slide" id="s0">{title_slide(module, brand)}{_footer(brand, -1, 0)}</section>')
+    from html2mp4 import media
     for i, (layout, inner) in enumerate(slides):
+        inner = media.resolve(inner)[0]                       # library images go into the page itself, so it travels with them
         sections.append(f'<section class="slide {esc(layout)}" id="s{i + 1}"><div class="slide-body">{inner}</div>'
                         f'{_footer(brand, i, total)}</section>')
     chunks = ([module.intro] if module.intro else []) + [s.say for s in module.slides]

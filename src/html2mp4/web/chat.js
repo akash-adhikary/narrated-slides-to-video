@@ -92,7 +92,9 @@ function render(){
     // only things that have not been on screen yet fade in, so a streaming reply doesn't flicker as it grows
     const fresh = i => { const n = !i.shown; return n ? " new" : ""; };
     const html = C.items.map((i, k) => {
-      const h = i.kind ? card(i, k).replace('class="ai-card"', `class="ai-card${fresh(i)}"`) : i.role === "user" ? `<div class="ai-msg user${fresh(i)}">${esc(i.text).replace(/\n/g, "<br>")}</div>`
+      const h = i.kind === "media" ? (typeof mediaCard === "function" ? mediaCard(i).replace('class="ai-card media"', `class="ai-card media${fresh(i)}"`) : "")
+        : i.kind ? card(i, k).replace('class="ai-card"', `class="ai-card${fresh(i)}"`)
+        : i.role === "user" ? `<div class="ai-msg user${fresh(i)}">${(i.images || []).map(m => `<img class="ai-msg-img" src="${m.preview}" alt="${esc(m.name)}">`).join("")}${esc(i.text).replace(/\n/g, "<br>")}</div>`
         : i.error ? `<div class="ai-msg err${fresh(i)}">${esc(i.text)}</div>` : i.text ? `<div class="ai-msg bot${fresh(i)}">${md(i.text)}</div>` : "";
       if(h) i.shown = true;
       return h;
@@ -103,7 +105,7 @@ function render(){
     renderChips(!C.busy && lastBot && lastBot === C.items.filter(i => !i.kind).at(-1) && lastBot.suggestions ? lastBot.suggestions : []);
   }
   $("#aiAutoRow").hidden = !designed() || !!W.viewing;
-  aiEl.input.disabled = !!W.viewing; aiEl.input.placeholder = W.viewing ? "Go back to the current version to talk to me" : "Tell me what to write or change…";
+  aiEl.input.disabled = !!W.viewing; aiEl.input.placeholder = W.viewing ? "Go back to the current version to talk to me" : (C.attach && C.attach.length) ? "Say what to do with it…" : "Tell me what to write or change…";
   aiEl.panel.classList.toggle("busy", C.busy);
   aiEl.send.disabled = C.busy || !!W.viewing;
   $("#aiModule").textContent = W.current ? W.current.name : "";
@@ -129,7 +131,7 @@ function autosize(){
 }
 aiEl.input.addEventListener("input", autosize);
 aiEl.input.addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); $("#aiForm").requestSubmit(); } });
-$("#aiForm").addEventListener("submit", e => { e.preventDefault(); const t = aiEl.input.value.trim(); if(t && !C.busy) sendMessage(t); });
+$("#aiForm").addEventListener("submit", e => { e.preventDefault(); const t = aiEl.input.value.trim() || ((C.attach || []).length ? "Here is an image." : ""); if(t && !C.busy) sendMessage(t); });
 
 const VIEWING = "You're viewing an earlier version. Go back to the current one to make changes.";
 async function sendMessage(text){
@@ -137,16 +139,19 @@ async function sendMessage(text){
   if(C.listening) stopListening();
   const pid = W.project;                                       // this reply belongs to the module it was asked in, even if you move on
   aiEl.input.value = ""; autosize();
-  C.items.push({role: "user", text}); C.busy = true; C.stage = "Thinking…";
+  const att = (C.attach || []).splice(0); if(typeof renderAttach === "function") renderAttach();
+  const said = att.length ? `${text}\n\n(Attached: ${att.map(a => `“${a.name}”`).join(", ")})` : text;
+  C.items.push({role: "user", text, images: att.map(a => ({id: a.id, name: a.name, preview: a.preview})), said}); C.busy = true; C.stage = "Thinking…";
   const bot = {role: "assistant", text: "", streaming: true}; C.items.push(bot); render();
-  const history = C.items.filter(i => !i.kind && !i.error && i !== bot && i.text).map(i => ({role: i.role, content: i.text}));
+  const history = C.items.filter(i => !i.kind && !i.error && i !== bot && i.text).map(i => ({role: i.role, content: i.said || i.text}));
   try{
-    const {id} = await post("/api/write/chat", {messages: history, script: box.value, project_id: W.project});
+    const {id} = await post("/api/write/chat", {messages: history, script: box.value, project_id: W.project, attachments: att.map(a => a.id)});
     let j;
     for(;;){
       await new Promise(r => setTimeout(r, 350));
       j = await api(`/api/write/chat/${id}`);
-      if(j.reply && j.reply !== bot.text){ bot.text = j.reply; C.stage = j.status === "running" ? "Writing…" : C.stage; render(); }
+      if(j.stage && j.status === "running" && C.stage !== j.stage){ C.stage = j.stage; render(); }
+      if(j.reply && j.reply !== bot.text){ bot.text = j.reply; C.stage = j.status === "running" ? (j.stage || "Writing…") : C.stage; render(); }
       else if(j.status === "running" && bot.text) C.stage = "Updating your script…";
       if(j.status !== "running") break;
     }
@@ -158,6 +163,7 @@ async function sendMessage(text){
       before = box.value; box.value = r.script; draft.set(r.script); parseNow();
       box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
     }
+    if(r.media && r.media.length){ C.items.push({kind: "media", media: r.media}); if(typeof loadMedia === "function") loadMedia(); }
     if((r.script && here) || r.visual_requests.length){
       const c = {kind: "update", changes: r.changes, summary: r.summary, requests: r.visual_requests, before};
       C.items.push(c);
