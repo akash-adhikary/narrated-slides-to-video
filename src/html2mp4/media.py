@@ -188,18 +188,19 @@ def _guess_kind(w, h, alpha):
 
 # ---------------------------------------------------------------- reading images back
 
-def image(item, frame=0):
-    """The item as a Pillow image (an animation's frame `frame`). SVGs can't be opened this way."""
+def image(item, frame=0, row=0):
+    """The item as a Pillow image (an animation's frame `frame`, of row `row`: a character's idle loop is row 0, talking row 1)."""
     if item["format"] == "svg": raise MediaError("SVG images can't be edited here. Convert it to PNG first (open it and export it as PNG).")
     im = Image.open(path(item)); im.load()
     if item.get("animated"):
-        w = item["w"]; im = im.crop((frame * w, 0, frame * w + w, item["h"]))
+        w, h = item["w"], item["h"]; row = min(row, item["animated"].get("rows", 1) - 1)
+        im = im.crop((frame * w, row * h, frame * w + w, row * h + h))
     return im.convert("RGBA") if item["transparent"] else im.convert("RGB")
 
 
-def frames(item):
+def frames(item, row=0):
     if not item.get("animated"): return [image(item)]
-    return [image(item, k) for k in range(item["animated"]["frames"])]
+    return [image(item, k, row) for k in range(item["animated"]["frames"])]
 
 
 MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif"}
@@ -209,14 +210,15 @@ def data_uri(item):
     return f"data:{MIME[item['format']]};base64," + base64.b64encode(path(item).read_bytes()).decode()
 
 
-def export(item, fmt):
-    """The image as a file to download, in png, jpg, webp or gif (an animation becomes an animated gif or webp)."""
+def export(item, fmt, row=0):
+    """The image as a file to download, in png, jpg, webp or gif (an animation becomes an animated gif or webp; `row` 1 is a
+    character's talking loop)."""
     fmt = {"jpeg": "jpg"}.get(fmt, fmt)
     if fmt not in ("png", "jpg", "webp", "gif"): raise MediaError("Choose png, jpg, webp or gif.")
     if item["format"] == "svg":
         if fmt != "png": raise MediaError("An SVG can be downloaded as it is, or as PNG.")
         raise MediaError("Converting SVG to PNG isn't available yet. Download the SVG itself.")
-    fr = frames(item); buf = io.BytesIO()
+    fr = frames(item, row); buf = io.BytesIO()
     if item.get("animated") and fmt in ("gif", "webp"):
         dur = round(1000 / item["animated"]["fps"])
         if fmt == "gif":
@@ -268,7 +270,7 @@ def _jpeg(im):
 
 # ---------------------------------------------------------------- edits (each makes a new item)
 
-OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob")
+OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate")
 
 
 def _box(b, w, h, name="box"):
@@ -287,10 +289,11 @@ def edit(item_id, op, params=None, name=None):
     if src is None: raise MediaError("That image isn't in the library.")
     if op not in OPS: raise MediaError(f"Unknown edit “{op}”. Available: {', '.join(OPS)}.")
     if op == "convert" and src.get("animated"): raise MediaError("An animation stays an animation. Download it as GIF or WebP instead.")
-    fr = frames(src) if op not in ("talk", "bob") else [image(src)]
+    if op in ("talk", "bob", "animate") and src.get("animated"): raise MediaError("This image is already animated. Start from the still picture.")
+    fr = frames(src) if op not in ("talk", "bob", "animate") else [image(src)]
     w, h = fr[0].size
     label = {"crop": "cropped", "trim": "trimmed", "resize": "resized", "rotate": "rotated", "flip": "flipped", "remove_background": "cut out",
-             "convert": params.get("format", "converted"), "pad": "padded", "talk": "talking", "bob": "moving"}[op]
+             "convert": params.get("format", "converted"), "pad": "padded", "talk": "talking", "bob": "moving", "animate": "animated"}[op]
     animated = src.get("animated")
     if op == "crop":
         b = _box(params.get("box"), w, h); fr = [f.crop(b) for f in fr]
@@ -320,6 +323,13 @@ def edit(item_id, op, params=None, name=None):
         fr = talk_frames(fr[0], params); animated = {"frames": len(fr), "fps": int(params.get("fps", 14)), "mode": "talk"}
     elif op == "bob":
         fr = bob_frames(fr[0], params); animated = {"frames": len(fr), "fps": int(params.get("fps", 12)), "mode": "loop"}
+    elif op == "animate":
+        if not src["transparent"]: raise MediaError("Bring to life works on a cut-out. Remove the background first.")
+        idle, talking = character_frames(fr[0], params.get("parts") or [], params.get("mouth"))
+        data, fw, fh = _sprite_rows([idle, talking] if talking else [idle])
+        animated = {"frames": len(idle), "fps": 16, "mode": "character" if talking else "loop", "rows": 2 if talking else 1}
+        return _store(data, "webp", fw, fh, True, name or f"{src['name']} (animated)", params.get("kind") or src["kind"],
+                      src.get("description", ""), src["id"], f"animate of {src['name']}", animated)
     alpha = any(_has_alpha(f) for f in fr)
     fmt = params.get("format") if op == "convert" else None
     if animated: data, fmt = _sprite(fr), "webp"
@@ -371,7 +381,8 @@ def remove_background(im, box=None, status=None):
     alpha = (np.clip(a, 0, 1) * 255).astype("uint8")
     if im.mode == "RGBA": alpha = np.minimum(alpha, np.asarray(im.getchannel("A")))
     out_im = rgb.convert("RGBA"); out_im.putalpha(Image.fromarray(alpha, "L"))
-    return out_im
+    clean = _defringe(np.asarray(out_im).astype(np.float32) / 255.0)          # edges take the subject's colour, not the old background's
+    return Image.fromarray((clean * 255).clip(0, 255).astype("uint8"), "RGBA")
 
 
 # ---------------------------------------------------------------- simple animations from a single picture
@@ -425,7 +436,10 @@ SPRITE_CSS = """/*h2m:media*/
 .h2m-sprite{display:inline-block;background-repeat:no-repeat;background-position:0 0;max-width:100%}
 .h2m-sprite.h2m-loop{animation-name:h2m-sprite;animation-iteration-count:infinite}
 #stage.speaking .slide.active .h2m-sprite.h2m-talk{animation-name:h2m-sprite;animation-iteration-count:infinite}
+.h2m-sprite.h2m-char{animation-name:h2m-sprite-x;animation-iteration-count:infinite;background-position-y:0}
+#stage.speaking .slide.active .h2m-sprite.h2m-char{background-position-y:100%}
 @keyframes h2m-sprite{to{background-position:100% 0}}
+@keyframes h2m-sprite-x{to{background-position-x:100%}}
 /*h2m:end*/"""
 
 
@@ -449,8 +463,8 @@ def resolve(html, lookup=None):
         an = it["animated"]; n = an["frames"]
         cls = re.search(r'\bclass\s*=\s*"([^"]*)"', attrs); style = re.search(r'\bstyle\s*=\s*"([^"]*)"', attrs)
         rest = re.sub(r'\s(?:class|style)\s*=\s*"[^"]*"', "", " " + attrs).strip()
-        mode = "h2m-talk" if an.get("mode") == "talk" else "h2m-loop"
-        css = (f"aspect-ratio:{it['w']}/{it['h']};background-image:url({data_uri(it)});background-size:{n * 100}% 100%;"
+        mode = {"talk": "h2m-talk", "character": "h2m-char"}.get(an.get("mode"), "h2m-loop")
+        css = (f"aspect-ratio:{it['w']}/{it['h']};background-image:url({data_uri(it)});background-size:{n * 100}% {an.get('rows', 1) * 100}%;"
                f"animation-duration:{n / an['fps']:.3f}s;animation-timing-function:steps({n},jump-none);" + (style.group(1) if style else ""))
         klass = f"h2m-sprite {mode}" + (f" {cls.group(1)}" if cls else "")
         return f'<span role="img" aria-label="{alt}" data-asset="{iid}" class="{klass}" style="{css}"{(" " + rest) if rest else ""}></span>'
@@ -465,7 +479,8 @@ def catalog_text(items=None, limit=40):
     rows = []
     for i in items[:limit]:
         bits = [i["kind"], f"{i['w']}×{i['h']}", "transparent background" if i["transparent"] else "opaque",
-                {"talk": "animated: talks while the narrator speaks", "loop": "animated: loops"}.get((i.get("animated") or {}).get("mode"), "")]
+                {"talk": "animated: talks while the narrator speaks", "loop": "animated: loops",
+                 "character": "animated character: always moving, and talks while the narrator speaks"}.get((i.get("animated") or {}).get("mode"), "")]
         rows.append(f"- {i['id']}: “{i['name']}” ({', '.join(b for b in bits if b)})" + (f". {i['description']}" if i.get("description") else ""))
     return "\n".join(rows)
 
@@ -564,5 +579,192 @@ def smart_edit(item_id, op, params=None, name=None, call=None, status=None):
         if status: status("Finding the mouth…")
         found, c = locate(item_id, "mouth", call); cost += c
         params["mouth"], params["line"] = found["box"], found.get("line")
-    if status: status({"remove_background": "Removing the background…", "talk": "Making it talk…"}.get(op, "Editing…"))
+    if op == "animate" and params.get("parts") is None:
+        if status: status("Finding the parts that can move…")
+        params["parts"], c = find_parts(item_id, call); cost += c
+        if not params["parts"]: raise MediaError(f"Claude didn't find parts that could move in “{it['name']}”. Bring to life works on a character such as a mascot.")
+        if params.get("mouth") is None:
+            if status: status("Finding the mouth…")
+            try: found, c = locate(item_id, "mouth", call); cost += c; params["mouth"] = found
+            except MediaError: params["mouth"] = None                     # no mouth: it moves, but doesn't talk
+    if status: status({"remove_background": "Removing the background…", "talk": "Making it talk…", "animate": "Animating each part…"}.get(op, "Editing…"))
     return edit(item_id, op, params, name), cost
+
+
+# ---------------------------------------------------------------- bringing a character to life (cut-out animation)
+# Claude finds the parts that can move (tail, ears, tongue...) and where each joins the body; Segment Anything cuts each part out;
+# then each part bends from its joint (nothing moves at the joint, the tip moves most), so there are no seams. The result has two
+# rows of frames: the idle loop (always playing) and the same loop with the mouth talking, which a slide shows only while the
+# narrator speaks.
+
+PARTS_SCHEMA = {"type": "object", "properties": {"parts": {"type": "array", "items": {"type": "object", "properties": {
+    "name": {"type": "string"}, "kind": {"type": "string", "enum": ["tail", "ear", "tongue", "wing", "arm", "other"]},
+    "box": {"type": "array", "items": {"type": "number"}}, "joint": {"type": "array", "items": {"type": "number"}},
+    "tip": {"type": "array", "items": {"type": "number"}}},
+    "required": ["name", "kind", "box", "joint", "tip"], "additionalProperties": False}}}, "required": ["parts"], "additionalProperties": False}
+
+# swing (degrees), cycles per loop, stretch: a happy wag, floppy ears on their own rhythm, a panting tongue
+MOTION = {"tail": (18, 2, 0.0), "ear": (7, 1, 0.0), "tongue": (7, 3, 0.06), "wing": (12, 2, 0.0), "arm": (6, 1, 0.0), "other": (5, 1, 0.0)}
+SPRITE_MAX_W = 16000                                                     # WebP images can't be wider than 16383 pixels
+
+
+def find_parts(item_id, call=None):
+    it = get(item_id)
+    a, cost = _look(it, f"This picture is {it['w']}×{it['h']} pixels. List the parts of this character that could move on their own in a "
+                        "simple, playful animation: a tail, each ear (separately), a tongue that sticks out, wings. For each: box = its tight "
+                        "bounding box, joint = the point where it attaches to the body (it pivots there), tip = its far end. Leave out parts "
+                        "that are hidden or fused to the body. If it isn't a character, return no parts.", PARTS_SCHEMA, call)
+    parts = [p for p in a.get("parts", []) if len(p.get("box") or []) == 4 and len(p.get("joint") or []) == 2 and len(p.get("tip") or []) == 2][:8]
+    return parts, cost
+
+
+def _defringe(rgba):
+    """A cut-out's soft edge still carries the colour of the background it was cut from (a dark halo on a light slide). Give edge
+    pixels the colour just inside them instead. `rgba` is a float array 0..1 (straight alpha); returns a new one."""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+    A = rgba.copy(); solid = (A[..., 3] > 0.92).astype(np.float32)
+    for r in (2, 5, 12):
+        den = gaussian_filter(solid, r)[..., None]
+        est = np.dstack([gaussian_filter(A[..., c] * solid, r) for c in range(3)]) / np.maximum(den, 1e-4)
+        edge = (A[..., 3] <= 0.92) & (den[..., 0] > 0.02) & (solid == 0)
+        A[..., :3] = np.where(edge[..., None], est, A[..., :3]); solid = np.maximum(solid, edge.astype(np.float32))
+    return A
+
+
+def _part_masks(rgb, alpha, parts, W, H):
+    """One clean mask per part, from Segment Anything (the image's embedding is computed once and shared)."""
+    import numpy as np, torch
+    from scipy.ndimage import gaussian_filter, label, maximum_filter
+    proc, model = _load_sam()
+    with torch.no_grad(): emb = model.get_image_embeddings(proc(rgb, return_tensors="pt")["pixel_values"])
+    cx, cy = W / 2, H / 2
+    masks = []
+    for p in parts:
+        b = [p["box"][0] * W, p["box"][1] * H, p["box"][2] * W, p["box"][3] * H]
+        jx, jy, tx, ty = p["joint"][0] * W, p["joint"][1] * H, p["tip"][0] * W, p["tip"][1] * H
+        pos = [[(jx + 2 * tx) / 3, (jy + 2 * ty) / 3], [(jx + tx) / 2, (jy + ty) / 2]]
+        inp = proc(rgb, input_boxes=[[b]], input_points=[[pos]], input_labels=[[[1, 1]]], return_tensors="pt")
+        with torch.no_grad():
+            out = model(image_embeddings=emb, input_boxes=inp["input_boxes"], input_points=inp["input_points"], input_labels=inp["input_labels"], multimask_output=True)
+        lg = proc.image_processor.post_process_masks(out.pred_masks, inp["original_sizes"], inp["reshaped_input_sizes"], binarize=False)[0][0]
+        v = torch.sigmoid(lg[int(out.iou_scores[0, 0].argmax())]).numpy() * alpha
+        core = v > 0.5
+        lab, n = label(core)
+        if n > 1: core = lab == (1 + int(np.argmax([(lab == i).sum() for i in range(1, n + 1)])))   # the part itself, not stray bits
+        if core.sum() < 20 or core.sum() > 0.3 * (alpha > 0.5).sum(): masks.append(None); continue     # nothing, or half the character
+        grow = 3 if p["kind"] == "tongue" else 7                                                    # take its outline and glow with it
+        masks.append(np.clip(gaussian_filter(maximum_filter(core.astype(np.float32), size=grow), 1.0), 0, 1))
+    return masks
+
+
+def character_frames(im, parts, mouth=None, frames_n=32):
+    """The idle loop and the talking loop of a cut-out character. `parts`: [{kind, box, joint, tip}] in fractions; `mouth`: {box, line}
+    as for talk_frames (None: no talking row). Returns (idle frames, talking frames)."""
+    import math, numpy as np
+    from scipy.ndimage import gaussian_filter
+    im = im.convert("RGBA"); w0, h0 = im.size; pad = round(max(w0, h0) * 0.09)
+    W, H = w0 + 2 * pad, h0 + 2 * pad
+    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0)); canvas.paste(im, (pad, pad))
+    A = _defringe(np.asarray(canvas).astype(np.float32) / 255.0)
+    P = np.dstack([A[..., :3] * A[..., 3:], A[..., 3:]])
+    shift = lambda q: [(q[0] * w0 + pad) / W, (q[1] * h0 + pad) / H]
+    parts = [{**p, "box": shift(p["box"][:2]) + shift(p["box"][2:]), "joint": shift(p["joint"]), "tip": shift(p["tip"])} for p in parts]
+    rgb = Image.new("RGB", (W, H), (128, 128, 128)); rgb.paste(canvas, (0, 0), canvas)
+    masks = _part_masks(rgb, A[..., 3], parts, W, H) if parts else []
+    rigs = [(p, m) for p, m in zip(parts, masks) if m is not None]
+    X, Y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+
+    def sample(img, sx, sy):
+        x0 = np.clip(np.floor(sx).astype(int), 0, W - 1); y0 = np.clip(np.floor(sy).astype(int), 0, H - 1)
+        x1, y1 = np.clip(x0 + 1, 0, W - 1), np.clip(y0 + 1, 0, H - 1); fx, fy = (sx - np.floor(sx))[..., None], (sy - np.floor(sy))[..., None]
+        out = img[y0, x0] * (1 - fx) * (1 - fy) + img[y0, x1] * fx * (1 - fy) + img[y1, x0] * (1 - fx) * fy + img[y1, x1] * fx * fy
+        return out * ((sx >= 0) & (sx <= W - 1) & (sy >= 0) & (sy <= H - 1))[..., None]
+
+    def geometry(p):
+        px, py = p["joint"][0] * W, p["joint"][1] * H; tx, ty = p["tip"][0] * W, p["tip"][1] * H
+        return px, py, tx, ty, max(4.0, math.hypot(tx - px, ty - py))
+
+    def weight(p, lo, span):                                             # 0 at the joint, rising to 1 further out
+        px, py, _, _, L = geometry(p)
+        x = np.clip((np.hypot(X - px, Y - py) / L - lo) / span, 0, 1); return x * x * (3 - 2 * x)
+
+    def bend(layer, p, deg, stretch):
+        px, py, tx, ty, L = geometry(p); ux, uy = (tx - px) / L, (ty - py) / L
+        dx, dy = X - px, Y - py; wgt = weight(p, 0.12, 0.6); a = -math.radians(deg) * wgt
+        c, s = np.cos(a), np.sin(a); qx, qy = c * dx - s * dy, s * dx + c * dy
+        if stretch:
+            along = qx * ux + qy * uy; k = 1 + stretch * wgt; qx, qy = qx - along * ux * (1 - 1 / k), qy - along * uy * (1 - 1 / k)
+        return sample(layer, qx + px, qy + py)
+
+    def fill(prem, hole, steps=60):                                      # paint what was under a part from around it
+        out, known = prem.copy(), ((1 - hole) * (prem[..., 3] > 0.5)).astype(np.float32)
+        for _ in range(steps):
+            acc, cnt = np.zeros_like(out), np.zeros(out.shape[:2], np.float32)
+            for sh in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                k = np.roll(known, sh, axis=(0, 1)); acc += np.roll(out, sh, axis=(0, 1)) * k[..., None]; cnt += k
+            grow = (known == 0) & (cnt > 0) & (hole > 0.02)
+            out[grow] = (acc / np.maximum(cnt, 1)[..., None])[grow]; known = np.maximum(known, grow.astype(np.float32))
+        return out
+
+    holes = [m * weight(p, 0.18, 0.35) for p, m in rigs]                 # only what really leaves its place is lifted from the body
+    lift = np.clip(sum((h for (p, _), h in zip(rigs, holes) if p["kind"] != "tongue"), np.zeros((H, W), np.float32)), 0, 1)
+    base = P * (1 - lift)[..., None]
+    for (p, _), h in zip(rigs, holes):
+        if p["kind"] == "tongue": base = fill(base * (1 - h)[..., None], h)
+    layers = [P * m[..., None] for _, m in rigs]
+    order = sorted(range(len(rigs)), key=lambda i: rigs[i][0]["kind"] == "tongue")      # the tongue in front
+    idle = []
+    for k in range(frames_n):
+        t = k / frames_n; img = base.copy()
+        for i in order:
+            p = rigs[i][0]; deg, cyc, st = MOTION.get(p["kind"], MOTION["other"]); ph = (sum(map(ord, p.get("name", ""))) % 100) / 100 * 2 * math.pi if p["kind"] == "ear" else 0.0
+            if p["kind"] == "ear" and p["joint"][0] > 0.5: deg = -deg                    # ears flop outwards, each its own way
+            lay = bend(layers[i], p, deg * math.sin(2 * math.pi * cyc * t + ph), st * (0.5 + 0.5 * math.sin(2 * math.pi * cyc * t + ph + 1)) if st else 0)
+            img = lay + img * (1 - lay[..., 3:])
+        br = 0.012 * math.sin(2 * math.pi * t)                           # breathing: a little taller, feet planted
+        img = sample(img, X, H - 1 - (H - 1 - Y) / (1 + br))
+        a = img[..., 3:]; col = np.where(a > 1e-4, img[..., :3] / np.maximum(a, 1e-4), 0)
+        idle.append(Image.fromarray((np.dstack([col, a]) * 255).clip(0, 255).astype(np.uint8), "RGBA"))
+    talking = []
+    if mouth:
+        pm = {"mouth": [(mouth["box"][0] * w0 + pad) / W, (mouth["box"][1] * h0 + pad) / H, (mouth["box"][2] * w0 + pad) / W, (mouth["box"][3] * h0 + pad) / H],
+              "line": [shift(q) for q in mouth["line"]] if mouth.get("line") else None, "open": mouth.get("open", 0.018) * h0 / H}
+        for k, f in enumerate(idle):                                     # the same loop, with the jaw going about four times a second
+            s = 0.5 - 0.5 * math.cos(2 * math.pi * 8 * k / frames_n)
+            talking.append(_jaw(f, pm, s))
+    boxes = [f.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox() for f in idle + talking]
+    boxes = [b for b in boxes if b]
+    if boxes:
+        b = (min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes))
+        idle, talking = [f.crop(b) for f in idle], [f.crop(b) for f in talking]
+    return idle, talking
+
+
+def _jaw(im, p, s):
+    """One talking frame: the jaw opened by s (0 closed, 1 fully open). Same mouth parameters as talk_frames."""
+    import numpy as np
+    a = np.asarray(im.convert("RGBA")).astype(np.float32); H, W = a.shape[:2]
+    x0, y0, x1, y1 = _box(p.get("mouth"), W, H, "mouth box")
+    pts = p.get("line") or [[x0 / W, y0 / H], [x1 / W, y0 / H]]
+    xs = np.array([float(q[0]) * W for q in pts]); ys = np.array([float(q[1]) * H for q in pts]); o = np.argsort(xs); xs, ys = xs[o], ys[o]
+    X, Y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32)); yl = np.interp(X, xs, ys)
+    cx, half = (xs[0] + xs[-1]) / 2, (xs[-1] - xs[0]) / 2 + 2
+    wx = np.clip(1 - ((X - cx) / half) ** 2, 0, 1) ** 2; wy = np.clip((y1 - Y) / np.maximum(y1 - yl, 1), 0, 1) * (Y >= yl - 1)
+    d = s * float(p.get("open", 0.018)) * H * wx * wy; sy = Y - d
+    r0 = np.clip(np.floor(sy).astype(int), 0, H - 1); r1 = np.clip(r0 + 1, 0, H - 1); f = (sy - np.floor(sy))[..., None]; cols = X.astype(int)
+    out = a[r0, cols] * (1 - f) + a[r1, cols] * f
+    k = np.clip((yl - sy) / 1.5, 0, 1)[..., None] * ((sy < yl) & (d > 0.3))[..., None]
+    out = out * (1 - k) + np.array([38, 18, 24, 255], np.float32) * k
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGBA")
+
+
+def _sprite_rows(rows):
+    """Frames of several rows (each the same length) as one sheet: row r, frame k at (k * w, r * h). Scaled down to fit WebP's limit."""
+    w, h = rows[0][0].size; n = len(rows[0])
+    scale = min(1.0, SPRITE_MAX_W / (w * n)); fw, fh = max(1, int(w * scale)), max(1, int(h * scale))
+    sheet = Image.new("RGBA", (fw * n, fh * len(rows)), (0, 0, 0, 0))
+    for r, row in enumerate(rows):
+        for k, f in enumerate(row): sheet.paste(f.convert("RGBA").resize((fw, fh), Image.LANCZOS), (k * fw, r * fh))
+    buf = io.BytesIO(); sheet.save(buf, "WEBP", quality=90, method=5)
+    return buf.getvalue(), fw, fh

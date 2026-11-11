@@ -23,7 +23,7 @@ SCHEMA = {"type": "object", "properties": {
     "suggestions": {"type": "array", "items": {"type": "string"}},
     "image_ops": {"type": "array", "items": {"type": "object", "properties": {
         "asset": {"type": "string"},
-        "op": {"type": "string", "enum": ["crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob"]},
+        "op": {"type": "string", "enum": ["crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate"]},
         "box": {"type": ["array", "null"], "items": {"type": "number"}},
         "size": {"type": ["number", "null"]}, "degrees": {"type": ["number", "null"]},
         "direction": {"type": ["string", "null"]}, "format": {"type": ["string", "null"]},
@@ -100,8 +100,10 @@ name and a description. You may also see images the person attached to their mes
   keep), `trim` (cut away transparent edges), `resize` (size = longest side in pixels), `rotate` (degrees), `flip` (direction
   "horizontal" or "vertical"), `remove_background` (box = the subject to keep, or null to let the studio find it), `convert`
   (format "png", "jpg" or "webp"), `pad` (make it square with a small margin), `talk` (makes a character's mouth move while the
-  narrator speaks; box null: the studio finds the mouth; best on a cut-out, so remove the background first), `bob` (a gentle floating
-  loop). Boxes are [left, top, right, bottom] as fractions of the image (0 to 1). `asset` is the image's ID, or "previous" for the
+  narrator speaks; box null: the studio finds the mouth; best on a cut-out, so remove the background first), `animate` (brings a
+  character to life: its tail, ears and tongue move on their own, it breathes, and its mouth talks while the narrator speaks; the
+  best choice when someone wants a mascot to feel alive or present; needs a cut-out, so remove the background first; box null),
+  `bob` (a gentle floating loop). Boxes are [left, top, right, bottom] as fractions of the image (0 to 1). `asset` is the image's ID, or "previous" for the
   result of the op before it, so you can chain (remove_background, then talk on "previous"). Give each result a short clear `name`,
   and set `kind` (mascot, logo, icon, photo, background, other) when it changes. Unused fields are null.
 - An attached image is already in the library (its ID is given). Say what you did in one line; the new images appear in the chat.

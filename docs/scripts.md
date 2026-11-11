@@ -46,6 +46,10 @@ into the module itself, so the playable HTML, the module file and every version 
 
 - **Remove background**: Claude finds the subject and a segmentation model on this computer cuts it out. The model (Segment
   Anything, about 375 MB) downloads the first time it's used. Nothing is sent anywhere except the small preview Claude looks at.
+- **Bring to life** (for a character such as a mascot, on a cut-out): Claude finds the parts that can move (tail, each ear, a tongue,
+  wings) and where each joins the body; the segmentation model cuts each part out; then each one moves on its own (a wagging tail,
+  floppy ears, a panting tongue) and the character breathes. Its mouth also talks while the narrator speaks. The image's soft edges
+  are cleaned so it sits well on light or dark slides. Download it as a GIF, or a GIF of it talking.
 - **Make it talk**: Claude finds the mouth and the jaw opens and closes. On a slide the mouth moves only while the narrator is
   speaking, and rests in the pauses (in the player and in the video). Works best on a cut-out.
 - **Gentle float**, **Crop** (drag a box), **Trim edges**, **Make square**, **Rotate**, **Flip**, **Shrink**, **To PNG / JPG**.

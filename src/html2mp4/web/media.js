@@ -3,7 +3,7 @@
 const M = {items: [], kinds: [], open: null, crop: null};
 const KIND_LABEL = {mascot: "Mascot", logo: "Logo", icon: "Icon", photo: "Photo", background: "Background", other: "Other"};
 const kb = n => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
-const badge = it => it.animated ? (it.animated.mode === "talk" ? "Talks" : "Moves") : it.transparent ? "Cut-out" : "";
+const badge = it => it.animated ? ({talk: "Talks", character: "Alive"}[it.animated.mode] || "Moves") : it.transparent ? "Cut-out" : "";
 
 async function loadMedia(){
   const r = await api("/api/media").catch(() => ({items: [], kinds: []}));
@@ -45,11 +45,12 @@ function openMedia(id){
   $("#mdName").value = it.name; $("#mdDesc").value = it.description || "";
   $("#mdKind").innerHTML = M.kinds.map(k => `<option value="${k}" ${k === it.kind ? "selected" : ""}>${KIND_LABEL[k] || k}</option>`).join("");
   $("#mdMeta").textContent = [`${it.w}×${it.h}`, kb(it.bytes), it.format.toUpperCase(), it.transparent ? "transparent background" : "",
-    it.animated ? (it.animated.mode === "talk" ? "talks while the narrator speaks" : "loops") : "", it.note ? `made by ${it.note.replace(/_/g, " ")}` : ""].filter(Boolean).join(" · ");
-  const fmts = it.format === "svg" ? ["svg"] : it.animated ? ["gif", "webp", "png"] : ["png", "jpg", "webp", "gif"];
-  $("#mdDl").innerHTML = fmts.map(f => `<a class="link" href="/api/media/${encodeURIComponent(it.id)}/download?format=${f}">${f.toUpperCase()}${it.animated && f === "png" ? " (first frame)" : ""}</a>`).join("");
+    it.animated ? ({talk: "talks while the narrator speaks", character: "always moving; talks while the narrator speaks"}[it.animated.mode] || "loops") : "", it.note ? `made by ${it.note.replace(/_/g, " ")}` : ""].filter(Boolean).join(" · ");
+  const fmts = it.format === "svg" ? [["svg"]] : it.animated ? [["gif"], ...(it.animated.rows > 1 ? [["gif", 1]] : []), ["webp"], ["png"]] : [["png"], ["jpg"], ["webp"], ["gif"]];
+  $("#mdDl").innerHTML = fmts.map(([f, row]) => `<a class="link" href="/api/media/${encodeURIComponent(it.id)}/download?format=${f}${row ? "&row=1" : ""}">${f.toUpperCase()}${row ? " (talking)" : ""}${it.animated && f === "png" ? " (first frame)" : ""}</a>`).join("");
   document.querySelectorAll("#mdDlg .md-acts button").forEach(b => { const op = b.dataset.op || "crop";
-    b.disabled = it.format === "svg" || (!!it.animated && !["resize", "flip", "trim", "pad", "rotate", "crop"].includes(op)); });
+    b.disabled = it.format === "svg" || (!!it.animated && !["resize", "flip", "trim", "pad", "rotate", "crop"].includes(op)) || (op === "animate" && !it.transparent); });
+  $("#mdDlg [data-op=animate]").title = it.transparent ? "Claude finds the tail, ears and tongue; they move, the character breathes, and its mouth talks while the narrator speaks" : "Remove the background first: this works on a cut-out";
   $("#mdStatus").textContent = ""; $("#mdDlg").open || $("#mdDlg").showModal();
 }
 $("#mdClose").addEventListener("click", () => $("#mdDlg").close());

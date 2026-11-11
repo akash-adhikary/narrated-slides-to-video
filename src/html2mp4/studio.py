@@ -938,15 +938,15 @@ def media_preview(iid: str):
 
 
 @app.get("/api/media/{iid}/download")
-def media_download(iid: str, format: str | None = None):
+def media_download(iid: str, format: str | None = None, row: int = 0):
     it = _item(iid)
     fmt = format or it["format"]
     if fmt == it["format"] and not it.get("animated"): data, mime = media.path(it).read_bytes(), media.MIME[it["format"]]
     else:
-        try: data, mime = media.export(it, fmt)
+        try: data, mime = media.export(it, fmt, row)
         except media.MediaError as e: raise HTTPException(400, str(e))
     ext = {"image/jpeg": "jpg"}.get(mime, mime.split("/")[1].replace("svg+xml", "svg"))
-    return Response(data, media_type=mime, headers={"Content-Disposition": attachment(f"{it['name']}.{ext}"), "Cache-Control": "no-store"})
+    return Response(data, media_type=mime, headers={"Content-Disposition": attachment(f"{it['name']}{' (talking)' if row else ''}.{ext}"), "Cache-Control": "no-store"})
 
 
 class MediaPatchIn(BaseModel):
@@ -989,6 +989,8 @@ def edit_media(iid: str, body: MediaEditIn):
     if body.op not in media.OPS: raise HTTPException(400, f"Unknown edit. Available: {', '.join(media.OPS)}.")
     if body.op == "talk" and not body.params.get("mouth") and not config.api_key_status()["set"]:
         raise HTTPException(400, "Finding the mouth needs Claude: add your Anthropic API key in Settings.")
+    if body.op == "animate" and body.params.get("parts") is None and not config.api_key_status()["set"]:
+        raise HTTPException(400, "Bringing a character to life needs Claude to find its parts: add your Anthropic API key in Settings.")
     jid = uuid.uuid4().hex[:10]
     job = media_jobs[jid] = {"id": jid, "status": "running", "label": "Starting…", "created": time.time()}
     threading.Thread(target=run_media_edit, args=(job, iid, body), daemon=True).start()

@@ -169,3 +169,58 @@ def test_a_module_with_an_image_reads_well_as_yaml_and_still_carries_it(client):
     view = client.get(f"/api/projects/{p['id']}/export", params={"format": "yaml", "inline": "true"}).text
     assert "<embedded image, " in view and "base64," not in view.split("<embedded image")[0][-200:]
     assert "data:image/png;base64," in client.get(f"/api/projects/{p['id']}/export").text      # the file itself keeps it
+
+
+def critter():
+    """A simple character: a body with a tail sticking up on the right and a mouth line, on a transparent background."""
+    im = Image.new("RGBA", (200, 160), (0, 0, 0, 0))
+    for x in range(40, 150):
+        for y in range(60, 140): im.putpixel((x, y), (230, 230, 230, 255))
+    for x in range(150, 170):
+        for y in range(20, 80): im.putpixel((x, y), (200, 120, 60, 255))
+    buf = io.BytesIO(); im.save(buf, "PNG"); return media.add(buf.getvalue(), "Critter.png")
+
+
+def tail_mask(rgb, alpha, parts, W, H):
+    import numpy as np
+    m = np.zeros((H, W), np.float32)
+    for p in parts:
+        x0, y0, x1, y1 = round(p["box"][0] * W), round(p["box"][1] * H), round(p["box"][2] * W), round(p["box"][3] * H); m[y0:y1, x0:x1] = 1
+    return [m * (alpha > 0.5)]
+
+
+TAIL = {"name": "tail", "kind": "tail", "box": [150 / 200, 20 / 160, 170 / 200, 80 / 160], "joint": [160 / 200, 78 / 160], "tip": [160 / 200, 22 / 160]}
+MOUTH = {"box": [0.3, 0.6, 0.6, 0.8], "line": [[0.3, 0.6], [0.6, 0.6]]}
+
+
+def test_bringing_a_character_to_life_moves_its_parts_and_talks_on_a_second_row(monkeypatch):
+    import numpy as np
+    monkeypatch.setattr(media, "_part_masks", tail_mask)                       # the cut-out model is tested by hand; here, a known mask
+    src = critter()
+    it = media.edit(src["id"], "animate", {"parts": [TAIL], "mouth": MOUTH})
+    assert it["animated"] == {"frames": 32, "fps": 16, "mode": "character", "rows": 2} and it["transparent"]
+    idle, talk = media.frames(it, 0), media.frames(it, 1)
+    tails = [np.asarray(f)[..., 3][: f.size[1] // 2, f.size[0] * 3 // 4:].sum() for f in idle]
+    a0 = np.asarray(idle[0]).astype(int); a4 = np.asarray(idle[4]).astype(int)
+    assert np.abs(a0 - a4)[: a0.shape[0] // 2, a0.shape[1] * 3 // 4:].sum() > 1000            # the tail is somewhere else
+    assert np.abs(a0 - np.asarray(talk[0]).astype(int)).sum() < np.abs(a0 - np.asarray(talk[2]).astype(int)).sum()   # the mouth opens on the talking row
+    html, _ = media.resolve(f'<img data-asset="{it["id"]}" alt="Critter">')
+    assert 'class="h2m-sprite h2m-char"' in html and "background-size:3200% 200%" in html
+    assert "#stage.speaking .slide.active .h2m-sprite.h2m-char{background-position-y:100%}" in media.SPRITE_CSS
+    gif, _ = media.export(it, "gif", 1); assert Image.open(io.BytesIO(gif)).n_frames == 32
+    with pytest.raises(media.MediaError, match="already animated"): media.edit(it["id"], "animate", {"parts": [TAIL]})
+    with pytest.raises(media.MediaError, match="Remove the background first"): media.edit(media.add(png(alpha=False), "Photo.png")["id"], "animate", {"parts": [TAIL]})
+
+
+def test_claude_finds_the_parts_and_the_mouth(monkeypatch):
+    monkeypatch.setattr(media, "_part_masks", tail_mask)
+    src = critter()
+    look = Look([{"parts": [TAIL]}, {"found": True, "box": [0.3, 0.55, 0.6, 0.8], "line": None, "note": ""},
+                 {"found": True, "box": [0.2, 0.2, 0.8, 0.8], "line": [[0.2, 0.2], [0.8, 0.2]], "note": ""}])
+    it, cost = media.smart_edit(src["id"], "animate", {}, None, call=look)
+    assert it["animated"]["mode"] == "character" and it["name"] == "Critter (animated)" and len(look.seen) == 3
+    none = Look([{"parts": []}])
+    with pytest.raises(media.MediaError, match="didn't find parts"): media.smart_edit(src["id"], "animate", {}, None, call=none)
+    no_mouth = Look([{"parts": [TAIL]}, {"found": False, "box": [], "line": None, "note": "no mouth"}])
+    it2, _ = media.smart_edit(src["id"], "animate", {}, "Tail only", call=no_mouth)
+    assert it2["animated"]["mode"] == "loop" and it2["animated"]["rows"] == 1                 # it moves, but there's nothing to talk with

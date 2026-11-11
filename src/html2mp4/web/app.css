@@ -705,3 +705,4 @@ body[data-page="write"] .ai{display:block}
   .ai-mi.bad small{color:#b42318}
   .md-stage.chk,.md-th.chk,.ip-th.chk,.ai-mi span.chk{background-color:#fff;background-image:conic-gradient(#ececf0 25%,transparent 0 50%,#ececf0 0 75%,transparent 0);background-size:18px 18px}
   @media (prefers-color-scheme:dark){.md-stage.chk,.md-th.chk,.ip-th.chk,.ai-mi span.chk{background-color:#2a2a31;background-image:conic-gradient(#34343c 25%,transparent 0 50%,#34343c 0 75%,transparent 0)}}
+  .md-acts .link.go{background:var(--accent);color:#fff;border-color:transparent}.md-acts .link.go:hover{filter:brightness(1.08)}
