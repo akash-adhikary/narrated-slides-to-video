@@ -939,6 +939,23 @@ def _item(iid):
     return it
 
 
+@app.get("/api/media/{iid}/bundle")
+def media_bundle(iid: str):
+    """A character as one small file to share: the character, his action clips and the cut-out they came from."""
+    _item(iid)
+    try: name, data = media.export_bundle(iid)
+    except media.MediaError as e: raise HTTPException(400, str(e))
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": attachment(name), "Cache-Control": "no-store"})
+
+
+@app.post("/api/media/import")
+def import_character(file: UploadFile = File(...)):
+    """Bring in a character file made by Export this character, here or on another computer."""
+    try: it, notes = media.import_bundle(file.file.read(media.MAX_VIDEO_UPLOAD + 1))
+    except media.MediaError as e: raise HTTPException(422, str(e))
+    return {"item": media_view(it), "notes": notes}
+
+
 @app.get("/api/media/{iid}/file")
 def media_file(iid: str):
     it = _item(iid)

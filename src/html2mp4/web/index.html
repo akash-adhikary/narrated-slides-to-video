@@ -335,7 +335,8 @@ Note: three cards, left to right</pre>
     <div class="card-h"><h2 id="hMedia">Media library</h2><p>Images and clips any module can use</p></div>
     <div class="md-drop" id="mdDrop">
       <input type="file" id="mdFile" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg,video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" multiple hidden>
-      <label for="mdFile" class="btn-2">Upload images or clips</label><span>or drop them here: mascots, logos, icons, office photos (PNG, JPG, WebP, GIF, SVG) and short video clips (MP4, MOV, WebM; up to a minute).</span>
+      <label for="mdFile" class="btn-2">Upload images or clips</label>
+      <input type="file" id="mdImportFile" accept=".zip,application/zip" hidden><label for="mdImportFile" class="link" title="A character file someone exported with “Export this character as a file”">Import a character</label><span>or drop them here: mascots, logos, icons, office photos (PNG, JPG, WebP, GIF, SVG) and short video clips (MP4, MOV, WebM; up to a minute).</span>
     </div>
     <div class="md-grid" id="mdGrid"></div>
     <p class="fine">Put an image on a slide with an <code>Image:</code> line in the script (or <b>Insert image</b> above the script), or just ask the assistant. Open an image to cut out its background, make a character talk, crop it, convert it or download it as PNG, JPG, WebP or GIF. A clip plays silently on its slide from when the slide appears; a clip of a character speaking can become a talking character. Edits make a new item; the original stays.</p>
@@ -436,6 +437,7 @@ Note: three cards, left to right</pre>
       <div class="md-actions" id="mdActions" hidden>
         <h4>What it can do <small>a script asks for these: “Spotter animate: wave”</small></h4>
         <div class="md-chips" id="mdActionList"></div>
+        <p class="fine"><a class="link" id="mdBundle" href="#" title="One small file with this character, his action clips and his voice, to import on another computer">Export this character as a file</a></p>
         <div class="md-row"><select id="mdActClip" aria-label="A clip to add as an action"></select><input id="mdActName" maxlength="24" placeholder="name, e.g. wave" autocomplete="off"><button class="btn-2 sm" type="button" id="mdActAdd">Add</button></div>
       </div>
       <div class="md-actions" id="mdClipTools" hidden>

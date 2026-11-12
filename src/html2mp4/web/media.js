@@ -69,6 +69,7 @@ async function loadVoices(){ if(!CV.voices){ try{ CV.voices = await api("/api/vo
 async function renderActor(it){
   const isChar = it.animated && it.animated.mode === "character", isClip = !!it.video;
   $("#mdVoiceL").hidden = !isChar; $("#mdActions").hidden = !isChar; $("#mdClipTools").hidden = !isClip;
+  if(isChar) $("#mdBundle").href = `/api/media/${encodeURIComponent(it.id)}/bundle`;
   if(isChar){
     const v = await loadVoices(); if(M.open !== it && M.open && M.open.id !== it.id) return;
     $("#mdVoice").innerHTML = `<option value="">Default (${esc((v.voices[0] || {}).name || "Puppy")})</option>` + v.voices.map(x => `<option value="${esc(x.id)}" ${String(it.voice || "").toLowerCase() === x.name.toLowerCase() || it.voice === x.id ? "selected" : ""}>${esc(x.name)}: ${esc(x.description)}</option>`).join("");
@@ -207,3 +208,14 @@ document.addEventListener("click", e => {
 });
 pageHooks.settings = (prev => async () => { await prev(); loadMedia(); })(pageHooks.settings);
 loadMedia();
+
+// bring in a character file
+$("#mdImportFile").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if(!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    toast("Importing the character…");
+    const r = await api("/api/media/import", {method: "POST", body: fd});
+    await loadMedia(); toast(`Imported “${r.item.name}”` + (r.notes.length ? ". " + r.notes[0] : ""));
+  }catch(err){ toast(err.message); }
+});

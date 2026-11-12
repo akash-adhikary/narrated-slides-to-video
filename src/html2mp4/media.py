@@ -1351,3 +1351,98 @@ def video_character(src, params, name=None, status=None):
     return _store(data, "webp", fw, fh, True, name or f"{src['name']} (character)", params.get("kind") or "mascot", src.get("description", ""),
                   src["id"], f"character from {src['name']}", {"frames": k, "fps": fps, "mode": "character", "rows": 2},
                   {**({"speaker": params["speaker"]} if params.get("speaker") else {}), **({"crop": src["crop"], "frame": src["frame"]} if src.get("crop") else {})})
+
+
+# ---------------------------------------------------------------- sharing a character: one small file
+
+# A character travels as a zip: its picture, its action clips and the cut-out they were made from (so new actions can still be matched to it),
+# with a manifest of how they fit together. Nothing else of the library goes in, and the original green-screen films stay behind.
+BUNDLE_FORMAT, BUNDLE_SCHEMA = "html2mp4.character", 1
+BUNDLE_KEYS = ("id", "name", "kind", "description", "file", "format", "w", "h", "transparent", "animated", "parent", "note", "seconds", "fps", "speech",
+               "poster", "crop", "frame", "speaker", "voice", "actions", "action_of")
+BUNDLE_MAX_BYTES, BUNDLE_MAX_FILES = 120 * 1024 * 1024, 40
+
+
+def bundle_items(item_id):
+    """The items a character is exported with: itself, the clips of its actions and the cut-out it came from."""
+    it = get(item_id)
+    if it is None or (it.get("animated") or {}).get("mode") != "character": raise MediaError("Only a talking character can be exported (one that has been brought to life or made from a clip).")
+    out, seen = [it], {it["id"]}
+    for cid in list((it.get("actions") or {}).values()) + [it.get("parent")]:
+        c = get(cid) if cid else None
+        if c and c["id"] not in seen and c["format"] in VIDEO_FORMATS: out.append(c); seen.add(c["id"])
+    return out
+
+
+def export_bundle(item_id):
+    """(file name, zip bytes) for a character."""
+    import zipfile
+    items = bundle_items(item_id); main = items[0]
+    manifest = {"format": BUNDLE_FORMAT, "schema": BUNDLE_SCHEMA, "main": main["id"], "name": main["name"],
+                "items": [{k: i[k] for k in BUNDLE_KEYS if k in i} for i in items]}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:                  # (the pictures and clips are already compressed)
+        z.writestr("character.json", json.dumps(manifest, indent=1, ensure_ascii=False))
+        z.writestr("README.txt", f"A character for the narrated-slides studio: {main['name']}.\nIn the Studio, open Settings > Media library and choose "
+                                 "\"Import a character\", then pick this file. It brings in the character, his action clips and his voice setting.\n")
+        for i in items: z.write(path(i), i["file"])
+    return f"{slug(main['name'])}.h2m-character.zip", buf.getvalue()
+
+
+def import_bundle(raw):
+    """Bring a character file into the library. Ids and names that are already taken are made unique (a character that speaks as someone
+    who already has one is added alongside, and reported). Returns (the character's new item, [notes])."""
+    import zipfile
+    try: z = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile: raise MediaError("That isn't a character file. Use a .zip made with “Export this character”.")
+    with z:
+        infos = z.infolist()
+        if len(infos) > BUNDLE_MAX_FILES or sum(i.file_size for i in infos) > BUNDLE_MAX_BYTES: raise MediaError("That character file is too large to import.")
+        try: m = json.loads(z.read("character.json"))
+        except (KeyError, ValueError): raise MediaError("That zip has no character in it (character.json is missing).")
+        if not isinstance(m, dict) or m.get("format") != BUNDLE_FORMAT: raise MediaError("That isn't a character file made by this Studio.")
+        if int(m.get("schema", 0)) > BUNDLE_SCHEMA: raise MediaError("That character was made by a newer Studio. Update this one (git pull, then restart) and try again.")
+        entries = [e for e in m.get("items", []) if isinstance(e, dict)]
+        if not entries or m.get("main") not in [e.get("id") for e in entries]: raise MediaError("That character file is damaged (it doesn't say which item is the character).")
+        names = {i.filename for i in infos}
+        loaded = []
+        for e in entries:
+            f = str(e.get("file", ""))
+            if f != pathlib.PurePosixPath(f).name or f.startswith(".") or f not in names or pathlib.PurePosixPath(f).suffix.lower() not in (".webp", ".webm", ".png"):
+                raise MediaError(f"That character file has an item this Studio won't import ({f[:40]!r}).")
+            data = z.read(f)
+            if f.endswith(".webm"):
+                if data[:4] != b"\x1a\x45\xdf\xa3": raise MediaError(f"{f} isn't a video this Studio can read.")
+            else:
+                try: Image.open(io.BytesIO(data)).verify()
+                except Exception: raise MediaError(f"{f} isn't an image this Studio can read.")
+            loaded.append((e, data))
+    notes, new = [], {}
+    with _lock:
+        items = listing(); first = None
+        for e, data in loaded:                                                   # new ids and names first, so references can be remapped
+            taken = items + list(new.values())                                         # (each pending item has an id and a name)
+            name = _unique_name(str(e.get("name") or "Character")[:60], taken)
+            base = _unique_id(name, taken)
+            new[e["id"]] = {"id": base, "name": name}
+        main_old = m["main"]
+        if any((i.get("speaker") or "").casefold() == str((next(e for e, _ in loaded if e["id"] == main_old).get("speaker")) or "—").casefold() for i in items):
+            notes.append("There is already a character that speaks as the same name. Both are in the library: remove one, or give one a different “Speaks as”.")
+        for e, data in loaded:
+            n = new[e["id"]]; ext = pathlib.PurePosixPath(e["file"]).suffix.lower()
+            clean = {k: e[k] for k in BUNDLE_KEYS if k in e and k not in ("id", "name", "file")}
+            for k in ("description", "note", "speaker", "voice", "kind"): clean[k] = str(clean[k])[:400] if k in clean else None
+            clean = {k: v for k, v in clean.items() if v is not None}
+            if clean.get("kind") not in KINDS: clean["kind"] = "other"
+            if "parent" in clean: clean["parent"] = new.get(clean["parent"], {}).get("id")
+            if "action_of" in clean: clean["action_of"] = new.get(clean["action_of"], {}).get("id")
+            if "actions" in clean: clean["actions"] = {str(k)[:24]: new[v]["id"] for k, v in (clean["actions"] or {}).items() if v in new}
+            clean = {k: v for k, v in clean.items() if v is not None or k not in ("parent", "action_of")}
+            MEDIA.mkdir(parents=True, exist_ok=True)
+            (MEDIA / f"{n['id']}{ext}").write_bytes(data)
+            item = {**clean, "id": n["id"], "name": n["name"], "file": f"{n['id']}{ext}", "bytes": len(data), "created": time.time(),
+                    "transparent": bool(e.get("transparent")), "format": ext.lstrip("."), "w": int(e.get("w", 0)), "h": int(e.get("h", 0))}
+            items.append(item)
+            if e["id"] == main_old: first = item
+        _save(items)
+    return first, notes

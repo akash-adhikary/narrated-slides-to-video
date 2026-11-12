@@ -426,3 +426,16 @@ def test_media_dialog_chooses_a_characters_voice_and_actions(page, app):
     page.locator("#mdActionList [data-rm=wink]").click(); page.wait_for_function("!document.querySelector('#mdActionList .md-chip.clip')")
     assert "actions" not in media.get(ch["id"])
     assert page.is_hidden("#mdClipTools")
+
+
+def test_a_character_is_exported_and_imported_from_the_media_library(page, app, tmp_path):
+    from html2mp4 import media
+    from test_actor import actor
+    ch = actor("wave")
+    page.goto(app + "/#settings"); page.wait_for_selector("#cardMedia"); page.wait_for_selector("#mdGrid .md-card")
+    page.locator("#mdGrid .md-card", has_text="Spotter").click(); page.wait_for_selector("#mdActions:not([hidden])")
+    href = page.get_attribute("#mdBundle", "href"); assert href == f"/api/media/{ch['id']}/bundle"
+    name, data = media.export_bundle(ch["id"]); f = tmp_path / name; f.write_bytes(data)
+    page.click("#mdClose"); page.set_input_files("#mdImportFile", str(f))
+    page.wait_for_function("[...document.querySelectorAll('#mdGrid .md-card')].some(c => c.innerText.includes('Spotter (2)'))")
+    assert media.get("spotter-2")["actions"] and media.get("spotter-2")["speaker"] == "Spotter"

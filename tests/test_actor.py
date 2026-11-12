@@ -440,3 +440,75 @@ def test_a_jump_is_really_drawn_even_when_the_designer_puts_the_reveal_on_the_pi
         rest = top(None); peak = top(["Spotter", "jump", "motion", 0.55, 1.1]); again = top(None)
         b.close()
     assert rest - peak > 40 and abs(again - rest) < 2                                                              # he is clearly higher at the top of the jump, and back down after
+
+
+# ---------------------------------------------------------------- sharing a character as one file
+
+def _zip(files, manifest=None):
+    import io, zipfile
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        if manifest is not None: z.writestr("character.json", json.dumps(manifest) if not isinstance(manifest, (bytes, str)) else manifest)
+        for k, v in files.items(): z.writestr(k, v)
+    return b.getvalue()
+
+
+def _entry(**kw): return {"id": "x", "name": "X", "kind": "mascot", "file": "x.webp", "format": "webp", "w": 4, "h": 4, "transparent": True, "animated": {"frames": 1, "fps": 12, "mode": "character", "rows": 1}, **kw}
+
+
+def test_a_character_travels_as_one_file_and_comes_back_whole(tmp_path, monkeypatch):
+    import io, zipfile
+    ch = actor("wave", "wink"); cut = clip("Cut out", 0.5)
+    items = media.listing(); next(i for i in items if i["id"] == ch["id"]).update(parent=cut["id"], speaker="Spotter", voice="Pup High"); media._save(items)
+    name, data = media.export_bundle(ch["id"])
+    z = zipfile.ZipFile(io.BytesIO(data)); manifest = json.loads(z.read("character.json"))
+    assert name == "spotter.h2m-character.zip" and manifest["format"] == media.BUNDLE_FORMAT and manifest["main"] == ch["id"]
+    assert len(manifest["items"]) == 4 and "README.txt" in z.namelist() and len(data) < 1_000_000                       # the character, two clips and the cut-out
+    monkeypatch.setattr(media, "MEDIA", tmp_path / "another-computer")                                                  # her library: empty
+    it, notes = media.import_bundle(data)
+    assert it["name"] == "Spotter" and notes == [] and it["speaker"] == "Spotter" and it["voice"] == "Pup High" and it["animated"]["rows"] == 2
+    assert set(it["actions"]) == {"wave", "wink"} and all(media.get(c)["format"] == "webm" and media.path(media.get(c)).exists() for c in it["actions"].values())
+    assert media.get(it["parent"])["name"] == "Cut out" and media.image(it, 3, 1).size == (60, 80) and media.actions_of(it)["wink"] == media.get(it["actions"]["wink"])["seconds"]
+    m = script.parse("Title: T\n## A\nSay: One.\nSpotter animate: wink\nSay: Two.\n")                                        # and a script uses him straight away
+    assert media.cast_for(m)["by_slide"] == {"s1": {"Spotter": {"wink"}}} and media.actor_voice("Spotter") == "Pup High"
+    again, notes2 = media.import_bundle(data)                                                                          # importing twice never overwrites
+    assert again["id"] != it["id"] and again["name"] == "Spotter (2)" and notes2 and "already a character" in notes2[0]
+    assert set(again["actions"].values()).isdisjoint(it["actions"].values()) and set(again["actions"]) == {"wave", "wink"}
+    assert len(media.listing()) == 8
+
+
+def test_only_a_talking_character_can_be_exported_and_only_a_real_character_file_imported(tmp_path):
+    still = media.add(_png(), "Still.png")
+    with pytest.raises(media.MediaError, match="Only a talking character"): media.export_bundle(still["id"])
+    png = _png(); ok = {"x.webp": png}
+    bad = {
+        "not a zip": b"hello",
+        "no manifest": _zip({"x.webp": png}),
+        "unreadable manifest": _zip({"x.webp": png}, "{not json"),
+        "wrong format": _zip(ok, {"format": "something.else", "schema": 1, "main": "x", "items": [_entry()]}),
+        "no main item": _zip(ok, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "nope", "items": [_entry()]}),
+        "path out of the library": _zip({"x.webp": png}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry(file="../x.webp")]}),
+        "a file that isn't in the zip": _zip({}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry()]}),
+        "a script": _zip({"x.py": b"print(1)"}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry(file="x.py")]}),
+        "an image that isn't one": _zip({"x.webp": b"not an image"}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry()]}),
+        "a video that isn't one": _zip({"x.webm": b"not a video"}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry(file="x.webm", format="webm")]}),
+    }
+    for what, data in bad.items():
+        with pytest.raises(media.MediaError): media.import_bundle(data)
+    with pytest.raises(media.MediaError, match="newer Studio"): media.import_bundle(_zip(ok, {"format": media.BUNDLE_FORMAT, "schema": 99, "main": "x", "items": [_entry()]}))
+    with pytest.raises(media.MediaError, match="too large"): media.import_bundle(_zip({f"f{i}.webp": png for i in range(media.BUNDLE_MAX_FILES + 1)}, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry()]}))
+    assert [i["id"] for i in media.listing()] == [still["id"]]                                                          # nothing half-imported
+    it, _ = media.import_bundle(_zip(ok, {"format": media.BUNDLE_FORMAT, "schema": 1, "main": "x", "items": [_entry(speaker="Zed", evil="x" * 9, kind="wizard", description="d" * 900)]}))
+    assert it["name"] == "X" and it["kind"] == "other" and len(it["description"]) == 400 and "evil" not in it                # only known fields, tidied
+
+
+def test_the_studio_exports_and_imports_a_character(client, tmp_path, monkeypatch):
+    ch = actor("wave")
+    r = client.get(f"/api/media/{ch['id']}/bundle")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip" and "spotter.h2m-character.zip" in r.headers["content-disposition"]
+    assert client.get(f"/api/media/{media.add(_png(), 'Still.png')['id']}/bundle").status_code == 400
+    monkeypatch.setattr(media, "MEDIA", tmp_path / "other")
+    got = client.post("/api/media/import", files={"file": ("Spotter.h2m-character.zip", r.content, "application/zip")}).json()
+    assert got["item"]["name"] == "Spotter" and got["item"]["actor"]["clips"]["wave"]["seconds"] == 0.5 and got["notes"] == []
+    bad = client.post("/api/media/import", files={"file": ("x.zip", b"nope", "application/zip")})
+    assert bad.status_code == 422 and "isn't a character file" in bad.json()["detail"]

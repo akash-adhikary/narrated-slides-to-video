@@ -51,6 +51,14 @@ line up. If a tool will not hold the green steady, try again or use a white back
 The assistant knows what each character can do, so you can ask it: *"add Spotter waving at the start and a wink after the second slide's
 last line."*
 
+## Sharing a character
+
+Open the character in **Settings > Media library** and choose **Export this character as a file**. You get one small `.zip` (Spotter's is
+about 8 MB) holding the character, his action clips, the cut-out they were made from (so new actions can still be matched to him) and his
+voice setting. On another computer, **Settings > Media library > Import a character** brings it all in. Importing never overwrites: if the
+name is taken the copy is called "Spotter (2)", and you are told when two characters speak as the same name. The original green-screen films
+are not included, and the file is a mascot, so share it only with people who should have it.
+
 ## Good to know
 
 - **The slide designer places the character** (large, on its own side, at the bottom of the slide) and leaves room for his jumps. A slide
