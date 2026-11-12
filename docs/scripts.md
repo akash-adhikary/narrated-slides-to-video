@@ -137,21 +137,35 @@ quickly, give it more time in either of two ways:
 If the graphic would simply be better appearing earlier in the sentence, that is a change to how the slide looks: ask for it in the
 chat or in "Ask for a change".
 
-### A second speaker (a mascot that talks)
+### A character that talks and acts (Spotter)
 
-A character can speak alongside the narrator, in its own voice. Name it once, anywhere in the script, with the voice it uses:
+A character from the media library, such as the Spotter mascot, can speak and act alongside the narrator. You don't set anything up in
+the script: use the character's name and it appears, on every slide where it speaks or acts. Three kinds of line, each on its own line
+where narration could go:
 
 ```
-Voice: Spotter = Puck
+Spotter say: Hi, I'm Spotter! I'll be with you the whole way.      <- he says it aloud, in his own voice. Nothing is printed.
+Spotter bubble: Ask me anything.                                    <- he says it aloud AND it is printed in a speech bubble.
+Spotter animate: wave                                               <- he does something between two sentences.
 ```
 
-then give it lines wherever narration could go: `Spotter: "Hi, I'm Spotter!"` on its own line in a scene (or `Spotter: Hi there.`
-in the `Say:` format). Every line not marked is the narrator's. Character voices: **Puck** (playful and young), **Sky** (light and
-lively), **Echo** (friendly and even) and **Nicole** (soft); any narrator voice works too. Without `= …` it is Puck.
+- **`say`** (also `speak`, or just `Spotter: …`) is the normal way. His words are heard, never shown.
+- **`bubble`** (also `caption`, `print`, `write`) is for when you want the words on screen as well.
+- **`animate`** (also `act`, `perform`) takes plain words: `wave`, `wink`, `laugh`, `jump`, `nod`, `shake his head`, `wag his tail`, `think`.
+  Two together work too: `wink then jump`. The words are matched by meaning, so `wiggle his tail` finds the tail wag. An animation
+  Spotter can't do is skipped and listed in the slide check, which also tells you what he can do.
+- With the colon after the name (`Spotter: animate wave`) or without it (`Spotter animate wave`), either works.
 
-Put the character on the slides where it speaks with an `Image:` line. A talking image marked **Speaks as: Spotter** in the media
-library moves its mouth only on Spotter's lines (and stays alive, without talking, while the narrator speaks); one with no speaker
-talks with the narrator. In the preview player with your browser's voice, the character's lines are spoken at a higher pitch.
+An action is a beat of its own: the narration pauses while it plays (a wave takes about two seconds), then carries on. An action
+at the start of a slide opens the slide with Spotter. The preview player and the video follow exactly the same timing.
+
+**Voices.** A character speaks with the voice set for it in **Settings > Media library > its picture > Voice** (Puppy by default: a bright,
+quick, boyish voice made from Puck lifted six semitones; Pup High, Buddy and Sunny are the others; **Listen** plays a sample). To use a
+different one in one script, add `Voice: Spotter = Buddy`, or adjust it: `Voice: Spotter = Puppy, pitch +2, pace 1.1`. Lifting the pitch
+also makes the voice sound smaller and younger, which is what a character wants. The narrator's voice is still chosen on the Create page.
+
+**What he can do** is shown in the same place: clips of him (wave, wink…), plus built-in motions of his picture that need no video:
+`jump`, `hop`, `nod`, `shake`, `bounce`, `wiggle` and `spin`. See [Characters](characters.md) to make your own.
 
 ### Say / Show
 

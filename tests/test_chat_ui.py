@@ -402,3 +402,27 @@ def test_every_page_loads_without_a_script_error(bare, app):
     for h in ("#write", "#create", "#settings", "#write"):
         bare.goto(app + "/" + h); bare.wait_for_timeout(400)
     assert errors == []
+
+
+def test_media_dialog_chooses_a_characters_voice_and_actions(page, app):
+    from html2mp4 import media
+    from test_actor import sprite, clip
+    ch = sprite(voice="Puppy"); w = clip("Wink clip", 0.7)
+    page.goto(app + "/#settings"); page.wait_for_selector("#cardMedia"); page.wait_for_selector("#mdGrid .md-card")
+    page.locator("#mdGrid .md-card", has_text="Wink clip").click(); page.wait_for_selector("#mdDlg[open]")
+    assert page.is_visible("#mdClipTools") and not page.is_visible("#mdActions") and not page.is_visible("#mdVoiceL")        # a clip: tools to use it
+    page.select_option("#mdClipActor", ch["id"]); page.fill("#mdClipAs", "wink"); page.click("#mdClipLink")
+    for _ in range(50):                                                                                            # the request answers, then the library is updated
+        if media.get(ch["id"]).get("actions"): break
+        page.wait_for_timeout(100)
+    assert media.get(ch["id"])["actions"] == {"wink": w["id"]}
+    page.click("#mdClose"); page.locator("#mdGrid .md-card", has_text="Spotter").click(); page.wait_for_selector("#mdActions:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#mdActionList .md-chip').length > 3 && document.querySelector('#mdVoice').options.length > 1")   # filled in after the voices load
+    chips = page.inner_text("#mdActionList")
+    assert "wink" in chips and "jump" in chips and "nod" in chips and page.locator("#mdActionList .md-chip.clip").count() == 1           # his clip, and the built-in motions
+    assert page.input_value("#mdVoice") == "puppy" and "Puppy" in page.inner_text("#mdVoiceL")
+    page.select_option("#mdVoice", "pup-high"); page.click("#mdSave"); page.wait_for_timeout(600)
+    assert media.actor_voice("Spotter") == "pup-high"
+    page.locator("#mdActionList [data-rm=wink]").click(); page.wait_for_function("!document.querySelector('#mdActionList .md-chip.clip')")
+    assert "actions" not in media.get(ch["id"])
+    assert page.is_hidden("#mdClipTools")

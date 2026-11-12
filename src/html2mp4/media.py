@@ -68,7 +68,7 @@ def _unique_name(name, items, exclude=None):
     return out
 
 
-def update(item_id, name=None, kind=None, description=None, speaker=None):
+def update(item_id, name=None, kind=None, description=None, speaker=None, voice=None):
     with _lock:
         items = listing(); it = next((i for i in items if i["id"] == item_id), None)
         if it is None: raise MediaError("That image isn't in the library.")
@@ -82,6 +82,14 @@ def update(item_id, name=None, kind=None, description=None, speaker=None):
             if kind not in KINDS: raise MediaError(f"The kind must be one of: {', '.join(KINDS)}.")
             it["kind"] = kind
         if description is not None: it["description"] = str(description).strip()[:400]
+        if voice is not None:                        # the voice this character speaks with ("" = the default character voice)
+            voice = re.sub(r"\s+", " ", str(voice)).strip()[:60]
+            if voice:
+                from html2mp4 import script
+                try: script.voice_id(voice)
+                except script.ScriptError as e: raise MediaError(str(e).split(": ", 1)[-1])
+                it["voice"] = voice
+            else: it.pop("voice", None)
         if speaker is not None:                      # the script's speaker this character speaks as ("" = the narrator)
             speaker = re.sub(r"\s+", " ", str(speaker)).strip()[:30]
             if speaker: it["speaker"] = speaker
@@ -95,6 +103,7 @@ def delete(item_id):
         if it is None: return
         try: path(it).unlink()
         except FileNotFoundError: pass
+        for old in (MEDIA / ".previews").glob(f"{item_id}-*"): old.unlink(missing_ok=True)
         _save([i for i in items if i["id"] != item_id])
 
 
@@ -206,7 +215,26 @@ def image(item, frame=0, row=0):
 
 def frames(item, row=0):
     if not item.get("animated"): return [image(item)]
-    return [image(item, k, row) for k in range(item["animated"]["frames"])]
+    an = item["animated"]; w, h = item["w"], item["h"]; row = min(row, an.get("rows", 1) - 1)
+    sheet = Image.open(path(item)); sheet.load()                                  # the sheet is decoded once, however many frames it holds
+    sheet = sheet.convert("RGBA" if item["transparent"] else "RGB")
+    return [sheet.crop((k * w, row * h, k * w + w, row * h + h)) for k in range(an["frames"])]
+
+
+def preview(item, size=360):
+    """What the Studio shows for an item: a small still, or for an animation a small looping animated WebP (cached, since making it takes a moment).
+    Returns (bytes, mime)."""
+    cache = MEDIA / ".previews"; cache.mkdir(parents=True, exist_ok=True)
+    f = cache / f"{item['id']}-{int(path(item).stat().st_mtime)}-{size}.webp"
+    if f.exists(): return f.read_bytes(), MIME["webp"]
+    if item.get("animated"):
+        fr = frames(item, 0); sc = min(1.0, size / max(fr[0].size))
+        fr = [x.resize((max(1, round(x.width * sc)), max(1, round(x.height * sc))), Image.LANCZOS) for x in fr]
+        buf = io.BytesIO(); fr[0].save(buf, "WEBP", save_all=True, append_images=fr[1:], duration=round(1000 / item["animated"]["fps"]), loop=0, quality=70, method=1)
+        data = buf.getvalue()
+    else: data = thumb(item, size)[0]
+    for old in cache.glob(f"{item['id']}-*"): old.unlink(missing_ok=True)
+    f.write_bytes(data); return data, MIME["webp"]
 
 
 MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif", "webm": "video/webm"}
@@ -281,8 +309,8 @@ def _jpeg(im):
 
 # ---------------------------------------------------------------- edits (each makes a new item)
 
-OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate", "character")
-VIDEO_OPS = ("remove_background", "character")                            # the edits a video clip can have
+OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate", "character", "clip")
+VIDEO_OPS = ("remove_background", "character", "clip")                    # the edits a video clip can have
 
 
 def _box(b, w, h, name="box"):
@@ -303,6 +331,7 @@ def edit(item_id, op, params=None, name=None, status=None):
     if src["format"] in VIDEO_FORMATS:
         if op == "remove_background": return video_cutout(src, params, name, status)
         if op == "character": return video_character(src, params, name, status)
+        if op == "clip": return video_part(src, params, name)
         raise MediaError(f"A video clip can have these edits: remove the background, or make a talking character from it.")
     if op == "character": raise MediaError("A talking character is made from a video clip of the character speaking. Upload the clip first.")
     if op == "convert" and src.get("animated"): raise MediaError("An animation stays an animation. Download it as GIF or WebP instead.")
@@ -477,7 +506,7 @@ def bob_frames(im, p):
 
 ASSET_TAG = re.compile(r"<img\b([^>]*?)\bdata-asset\s*=\s*[\"']([^\"']+)[\"']([^>]*)>", re.I)
 SPRITE_CSS = """/*h2m:media*/
-.h2m-sprite{display:inline-block;background-repeat:no-repeat;background-position:0 0;max-width:100%}
+.h2m-sprite{display:inline-block;background-repeat:no-repeat;background-position:0 0;max-width:100%;width:100%}
 .h2m-sprite.h2m-loop{animation-name:h2m-sprite;animation-iteration-count:infinite}
 #stage.speaking:not([data-speaker]) .slide.active .h2m-sprite.h2m-talk:not([data-speaker]){animation-name:h2m-sprite;animation-iteration-count:infinite}
 .h2m-sprite.h2m-char{animation-name:h2m-sprite-x;animation-iteration-count:infinite;background-position-y:0;position:relative}
@@ -486,6 +515,12 @@ SPRITE_CSS = """/*h2m:media*/
 #stage.speaking:not([data-speaker]) .slide.active .h2m-sprite.h2m-char:not([data-speaker])::after{opacity:1}
 @keyframes h2m-sprite{to{background-position:100% 0}}
 @keyframes h2m-sprite-x{to{background-position-x:100%}}
+.h2m-actor{display:inline-block;position:relative;max-width:100%;width:100%}
+.h2m-actor>.h2m-sprite{display:block;width:100%;transform-origin:50% 100%;transition:opacity .14s linear}
+.h2m-sprite{transform-origin:50% 100%}
+.h2m-act{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .14s linear;pointer-events:none}
+.h2m-act.on{opacity:1}
+.h2m-actor.acting>.h2m-sprite{opacity:0;transition:opacity 0s linear .14s}
 /*h2m:end*/"""
 
 
@@ -509,8 +544,11 @@ def speaker_css(names):
 def asset_ids(html): return [m.group(2) for m in ASSET_TAG.finditer(html or "")]
 
 
-def resolve(html, lookup=None):
-    """Replace every <img data-asset="..."> with the image itself. Returns (html, missing ids)."""
+def resolve(html, lookup=None, clips=None, defs=None):
+    """Replace every <img data-asset="..."> with the image itself. Returns (html, missing ids).
+    `clips` ({character name: {action, ...}}): the actions of a character that a module uses as video clips, which go into the page
+    inside the character's picture, ready for the player to show (and the video renderer to step through).
+    `defs` (a dict): when given, an animated picture's data goes there once (to be written as the class `h2m-pic-<id>`) instead of into every place it is used."""
     lookup = lookup or get
     missing, cache = [], {}
 
@@ -528,12 +566,28 @@ def resolve(html, lookup=None):
         if not it.get("animated"):
             return f'<img {attrs} src="{data_uri(it)}" alt="{alt}" data-asset="{iid}" draggable="false">'.replace("  ", " ")
         an = it["animated"]; n = an["frames"]
+        def picture():                       # (a custom property can't hold this: browsers drop values over about 2 MB, so a class carries it)
+            if defs is None: return f"background-image:url({data_uri(it)});"
+            defs[iid] = data_uri(it); return ""
+        pic_class = f"h2m-pic-{iid}" if defs is not None else ""
         cls, style = _attr(attrs, "class"), _attr(attrs, "style")          # either quote style (a second class="" would be ignored by the browser)
         rest = re.sub(r'\s(?:class|style)\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', "", " " + attrs).strip()
         mode = {"talk": "h2m-talk", "character": "h2m-char"}.get(an.get("mode"), "h2m-loop")
-        css = (f"aspect-ratio:{it['w']}/{it['h']};background-image:url({data_uri(it)});background-size:{n * 100}% {an.get('rows', 1) * 100}%;"
+        css = (f"aspect-ratio:{it['w']}/{it['h']};{picture()}background-size:{n * 100}% {an.get('rows', 1) * 100}%;"
                f"animation-duration:{n / an['fps']:.3f}s;animation-timing-function:steps({n},jump-none);" + (style or ""))
-        klass = f"h2m-sprite {mode}" + (f" {cls}" if cls else "")
+        who = it.get("speaker"); used = sorted((clips or {}).get(who, ())) if who else []
+        if who and clips is not None and who in clips and an.get("mode") == "character":
+            # (a character that acts is always wrapped, even when its actions are only motions: the slide's own reveal rules put a transform and a
+            # transition on anything with data-c, which would swallow a jump, so the designer's attributes go on the box and the motion on the picture)
+            # a character with action clips: an outer box carries the designer's class, size and position; the picture and the clips sit inside
+            inner_css = f"aspect-ratio:{it['w']}/{it['h']};{picture()}background-size:{n * 100}% {an.get('rows', 1) * 100}%;" \
+                        f"animation-duration:{n / an['fps']:.3f}s;animation-timing-function:steps({n},jump-none);"
+            vids = "".join(f'<video class="h2m-act" data-act="{_html.escape(k, quote=True)}" src="{data_uri(get(it["actions"][k]))}" muted playsinline preload="auto" '
+                           f'disablepictureinpicture></video>' for k in used)
+            outer = f"aspect-ratio:{it['w']}/{it['h']};" + (style or "")
+            return (f'<span role="img" aria-label="{alt}" data-asset="{iid}" class="h2m-actor{(" " + cls) if cls else ""}" style="{outer}"{(" " + rest) if rest else ""}>'
+                    f'<span class="h2m-sprite {mode}{(" " + pic_class) if pic_class else ""}" data-speaker="{_html.escape(who, quote=True)}" style="{inner_css}"></span>{vids}</span>')
+        klass = f"h2m-sprite {mode}" + (f" {pic_class}" if pic_class else "") + (f" {cls}" if cls else "")
         return f'<span role="img" aria-label="{alt}" data-asset="{iid}" class="{klass}" style="{css}"{(" " + rest) if rest else ""}></span>'
 
     return ASSET_TAG.sub(one, html or ""), missing
@@ -548,7 +602,9 @@ def catalog_text(items=None, limit=40):
         bits = [i["kind"], f"{i['w']}×{i['h']}", "transparent background" if i["transparent"] else "opaque",
                 {"talk": "animated: talks while the narrator speaks", "loop": "animated: loops",
                  "character": "animated character: always moving, and talks while the narrator speaks"}.get((i.get("animated") or {}).get("mode"), "")]
-        if i.get("speaker") and i.get("animated"): bits[-1] = bits[-1].replace("the narrator speaks", f"{i['speaker']} speaks (a speaker in the script)")
+        if i.get("speaker") and i.get("animated"):
+            have = ", ".join(actions_of(i)) if (i["animated"] or {}).get("mode") == "character" else ""
+            bits[-1] = bits[-1].replace("the narrator speaks", f"{i['speaker']} speaks") + (f"; a talking character that speaks as {i['speaker']}, who can: {have}" if have else "")
         if i.get("format") in VIDEO_FORMATS: bits = [i["kind"], f"{i['w']}×{i['h']}", f"video clip, {i.get('seconds', 0):g} s, plays silently from the start of its slide"]
         rows.append(f"- {i['id']}: “{i['name']}” ({', '.join(b for b in bits if b)})" + (f". {i['description']}" if i.get("description") else ""))
     return "\n".join(rows)
@@ -840,6 +896,137 @@ def _sprite_rows(rows):
     return buf.getvalue(), fw, fh
 
 
+# ---------------------------------------------------------------- actors: a character that speaks and acts on cue
+# A character (an animated "character" image that speaks as, say, Spotter) is an actor. A script gives it lines ("Spotter say: …") and
+# things to do ("Spotter animate: wave"). What it can do is either a clip of it doing that (an item whose clip is linked under the
+# character's `actions`) or a built-in motion of the picture itself (jump, nod, shake, bounce...). The words in a script are matched to
+# an action by meaning ("wiggle his tail" is `wag`), so nobody has to learn the exact names.
+
+MOTIONS = {  # built-in motions of the character's picture: name -> seconds. The shapes live in compose.MOTION_JS.
+    "jump": 1.1, "hop": 0.6, "nod": 1.1, "shake": 1.2, "bounce": 1.4, "wiggle": 1.2, "spin": 1.2,
+}
+SYNONYMS = {  # canonical action -> words or phrases that mean it
+    "wave": "wave waves waving hello hi hey greet greets greeting goodbye bye welcome",
+    "wink": "wink winks winking",
+    "laugh": "laugh laughs laughing giggle giggles chuckle chuckles lol haha laughter",
+    "jump": "jump jumps jumping leap leaps",
+    "hop": "hop hops hopping",
+    "wag": "wag wags wagging waggle wiggle wiggles tail",
+    "think": "think thinks thinking ponder ponders hmm wonder puzzled curious",
+    "nod": "nod nods nodding agree agrees approve yes",
+    "shake": "shake shakes disagree nope no",
+    "bounce": "bounce bounces bouncing excited dance dances dancing party celebrate celebrates cheer cheers hooray yay",
+    "wiggle": "wiggle wiggles wiggling",
+    "spin": "spin spins twirl twirls turn around",
+    "celebrate": "celebrate celebrates cheer cheers hooray yay party dance dances dancing",
+    "point": "point points present presents gesture",
+    "sit": "sit sits", "sleep": "sleep sleeps nap yawn",
+}
+
+
+def actor(name):
+    """The library character that speaks as `name`, or None."""
+    n = str(name or "").strip().casefold()
+    return next((i for i in listing() if n and str(i.get("speaker", "")).casefold() == n and (i.get("animated") or {}).get("mode") == "character"), None)
+
+
+def actor_voice(name):
+    """What the library says this character's voice is (a name like 'Puppy'), or None."""
+    it = actor(name); return it.get("voice") if it else None
+
+
+def actions_of(it):
+    """{action name: seconds} a character can do: its own clips first, then the built-in motions it doesn't have a clip for."""
+    out = dict(MOTIONS)
+    for k, cid in (it.get("actions") or {}).items():
+        c = get(cid)
+        if c and c["format"] in VIDEO_FORMATS: out[k] = c.get("seconds", 2.0)
+    return out
+
+
+def match_actions(text, available):
+    """The actions (from `available`) that a phrase like 'wiggle his tail and wink' asks for, in the order it asks, at most three."""
+    words = re.findall(r"[a-z']+", str(text).lower()); joined = " " + " ".join(words) + " "
+    found = []                                                          # (position in the text, action)
+    for act in available:
+        keys = set(SYNONYMS.get(act, "").split()) | {act.lower(), act.lower() + "s", act.lower() + "ing"}
+        pos = [i for i, w in enumerate(words) if w in keys]
+        for phrase in [x for x in keys if " " in x]:
+            if f" {phrase} " in joined: pos.append(joined.index(f" {phrase} "))
+        if pos: found.append((min(pos), act))
+    # words that name one thing must not also pick a loose neighbour: "wiggle his tail" is a wag (wag mentions tail), not a wiggle,
+    # when the character has a wag clip; so when two actions answer the same word, the character's own clip wins
+    ordered = [a for _, a in sorted(found)]
+    words_used = {}
+    for act in ordered:
+        for w in set(SYNONYMS.get(act, "").split()) | {act}:
+            if w in words: words_used.setdefault(w, []).append(act)
+    drop = set()
+    for w, acts in words_used.items():
+        if len(acts) > 1:
+            own = [a for a in acts if a not in MOTIONS]
+            if own: drop |= {a for a in acts if a in MOTIONS}
+    return [a for a in ordered if a not in drop][:3]
+
+
+def link_action(actor_id, name, clip_id, start=None, end=None, status=None):
+    """Make a clip (or a part of it, from `start` to `end` seconds) one of a character's actions, under a name like 'wave'. A clip filmed on a green
+    screen is cut out first, in the same frame as the character, so the character doesn't shift when it switches to the action."""
+    name = re.sub(r"[^a-z0-9 -]", "", str(name or "").lower()).strip()[:24]
+    if not name: raise MediaError("Give the action a name, like wave or wink.")
+    it, clip = get(actor_id), get(clip_id)
+    if it is None or (it.get("animated") or {}).get("mode") != "character": raise MediaError("Pick a talking character (one that has been brought to life or made from a clip) to add the action to.")
+    if clip is None or clip["format"] not in VIDEO_FORMATS: raise MediaError("An action is a video clip. Upload the clip first.")
+    if clip.get("transparent"):
+        if start is not None or end is not None: clip = video_part(clip, {"start": start or 0, "end": end if end is not None else clip.get("seconds", 0)}, name=f"{it['name']} {name}")
+    else:
+        if status: status("Cutting the clip out to match the character…")
+        clip = video_cutout(clip, {"like": it.get("parent"), "start": start or 0, "end": end if end is not None else clip.get("seconds", 0)}, name=f"{it['name']} {name}", status=status)
+    with _lock:
+        items = listing(); it = next(i for i in items if i["id"] == actor_id)
+        it.setdefault("actions", {})[name] = clip["id"]
+        if clip["id"] != clip_id: next(i for i in items if i["id"] == clip["id"])["action_of"] = actor_id          # made for this action: it lives with the character
+        _save(items); return it
+
+
+def unlink_action(actor_id, name):
+    with _lock:
+        items = listing(); it = next((i for i in items if i["id"] == actor_id), None)
+        if it is None: raise MediaError("That character isn't in the library.")
+        (it.get("actions") or {}).pop(name, None)
+        if not it.get("actions"): it.pop("actions", None)
+        _save(items); return it
+
+
+def cast_for(module):
+    """What the page needs to know about the characters acting in a module: for each actor its clips and durations, what each slide
+    makes it do and when (resolved to real actions), and the actions a script asks for that the character can't do.
+    Returns {"actors": {name: {"item": id, "actions": {action: {"kind": "clip"|"motion", "seconds": s}}}}, "acts": {slide id: {at: [[name, action]]}},
+    "clips": {name: {action,...}}, "by_slide": {slide id: {name: {action,...}}}, "unknown": [(slide id, name, phrase)]}; nothing in it when no slide acts."""
+    from html2mp4.compose import scene_ids
+    ids = scene_ids(module); rows = ([(module.intro_acts, module.intro_speakers)] if module.intro else []) + [(s.acts, s.speakers) for s in module.slides]
+    out = {"actors": {}, "acts": {}, "clips": {}, "by_slide": {}, "unknown": []}
+    for sid, (acts, _sp) in zip(ids, rows):
+        for a in acts:
+            it = actor(a["who"])
+            have = actions_of(it) if it else dict(MOTIONS)
+            found = match_actions(a["do"], list(have))
+            if not found:
+                if it is None or not re.fullmatch(r"\s*(?:idle|stand|appear|smile|hello there|stay)\s*", a["do"], re.I): out["unknown"].append((sid, a["who"], a["do"]))
+                continue
+            for act in found:
+                clip = it and (it.get("actions") or {}).get(act) and get(it["actions"][act])
+                kind = "clip" if clip and clip["format"] in VIDEO_FORMATS else "motion"
+                ent = out["actors"].setdefault(a["who"], {"item": it["id"] if it else None, "actions": {}})
+                ent["actions"][act] = {"kind": kind, "seconds": float(have[act])}
+                out["by_slide"].setdefault(sid, {}).setdefault(a["who"], set())               # a character that acts on a slide is wrapped there (see resolve)
+                if kind == "clip":
+                    out["clips"].setdefault(a["who"], set()).add(act)
+                    out["by_slide"][sid][a["who"]].add(act)                                       # a slide carries only the clips it plays
+                out["acts"].setdefault(sid, {}).setdefault(str(a["at"]), []).append([a["who"], act])
+    return out
+
+
 # ---------------------------------------------------------------- video clips
 # A clip is kept as WebM (VP9), whatever was uploaded: the video renderer's browser plays it, it can carry transparency, and with a
 # keyframe every half second the renderer can show any exact moment of it. Clips are silent on a slide (the narration is the
@@ -950,9 +1137,10 @@ def _encode_webm(frames, fps, alpha):
 def _cut_frames(frames, box=None, status=None, label="Removing the background"):
     """Remove the background from every frame (the subject found in each), then crop all of them to the same box."""
     out = []
+    key = None if box else green_screen_colour(frames[0])                 # filmed on a green screen: key it (fast and clean); otherwise cut each frame out
     for k, f in enumerate(frames):
         if status and k % 6 == 0: status(f"{label}: frame {k + 1} of {len(frames)}…")
-        out.append(remove_background(f, box))
+        out.append(chroma_key(f, key) if key else remove_background(f, box))
     boxes = [f.getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox() for f in out]
     boxes = [b for b in boxes if b]
     if not boxes: raise MediaError("Couldn't find the subject in the clip.")
@@ -960,6 +1148,51 @@ def _cut_frames(frames, box=None, status=None, label="Removing the background"):
     b = (max(0, min(x[0] for x in boxes) - m), max(0, min(x[1] for x in boxes) - m), min(W, max(x[2] for x in boxes) + m), min(H, max(x[3] for x in boxes) + m))
     cut = [f.crop(b) for f in out]
     return [_fade_cut_edges(f, b, (W, H)) for f in cut]
+
+
+def green_screen_colour(im):
+    """The colour of a green-screen backdrop, read from the picture's edges (any shade of green), or None when the edges aren't green."""
+    import numpy as np
+    a = np.asarray(im.convert("RGB")).astype(np.float32) / 255; h, w = a.shape[:2]; m = max(2, round(0.03 * min(h, w)))
+    rim = np.concatenate([a[:m].reshape(-1, 3), a[-m:].reshape(-1, 3), a[:, :m].reshape(-1, 3), a[:, -m:].reshape(-1, 3)])
+    green = (rim[:, 1] - np.maximum(rim[:, 0], rim[:, 2]) > 0.25) & (rim[:, 1] > 0.45)
+    return tuple(float(x) for x in np.median(rim[green], axis=0)) if green.mean() > 0.5 else None
+
+
+def _main_subject(alpha, keep=0.02, grow=4):
+    """Keep only the main subject of a matte: parts at least `keep` of the biggest part's size (a detached ear or tail tip is kept), plus the soft
+    edge around them; specks, sparkles and watermarks are dropped."""
+    import numpy as np
+    from scipy import ndimage
+    solid = alpha > 0.2
+    lab, n = ndimage.label(solid)
+    if n <= 1: return alpha
+    sizes = ndimage.sum(solid, lab, range(1, n + 1)); big = np.isin(lab, [i + 1 for i, z in enumerate(sizes) if z >= keep * sizes.max()])
+    near = ndimage.binary_dilation(big, iterations=grow)
+    return np.where(near, alpha, 0.0)
+
+
+def chroma_key(im, key=None, lo=0.30, hi=0.72, main_only=True):
+    """A frame filmed in front of a green screen as an RGBA cut-out: a soft matte (so fur and motion blur keep their edges) and the
+    green spill taken out of the colours. `key` is the screen's colour (found from the edges when not given)."""
+    import numpy as np
+    a = np.asarray(im.convert("RGB")).astype(np.float32) / 255
+    kr, kg, kb = key or green_screen_colour(im) or (0.0, 1.0, 0.0)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    # how green a pixel is relative to its own brightness, against how green the screen is: a shadow on the screen is as green as the screen
+    ex = g - np.maximum(r, b)
+    t = (ex / np.maximum(g, 1e-3)) / max((kg - max(kr, kb)) / kg, 1e-3)
+    alpha = 1.0 - np.clip((t - lo) / (hi - lo), 0.0, 1.0); alpha = alpha * alpha * (3 - 2 * alpha)
+    alpha[alpha < 0.03] = 0.0
+    if main_only: alpha = _main_subject(alpha)
+    # edge pixels are a mix of the character and the screen: take the screen's share out, then cap what green is left
+    fg = a.copy(); soft = (alpha > 0.0) & (alpha < 1.0)
+    for c, k in enumerate((kr, kg, kb)): fg[..., c] = np.where(soft, (a[..., c] - (1 - alpha) * k) / np.maximum(alpha, 1e-3), a[..., c])
+    fg = np.clip(fg, 0, 1)
+    cap = np.maximum(fg[..., 0], fg[..., 2]) + np.where(soft, 0.0, 0.02)       # edge pixels keep no green at all
+    fg[..., 1] = np.minimum(fg[..., 1], cap)
+    out = np.dstack([fg, alpha])
+    return Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA")
 
 
 def _fade_cut_edges(f, box, size, share=0.14):
@@ -981,16 +1214,88 @@ def _fade_cut_edges(f, box, size, share=0.14):
     return Image.fromarray(a, "RGBA")
 
 
+def clip_extent(src, start=0.0, end=None, max_side=1280):
+    """(box, frame size): the smallest box, in the clip's pixels, that holds the subject of a green-screen clip everywhere it goes."""
+    end = src.get("seconds", 0) if end is None else end
+    probe = video_frames(src, start, end, 8, max_side=max_side)
+    key = green_screen_colour(probe[0]) if probe else None
+    boxes = [b for b in (chroma_key(f, key).getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox() for f in probe) if b]
+    if not boxes: raise MediaError("Couldn't find the subject in the clip.")
+    return (min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes)), probe[0].size
+
+
+def frame_around(*boxes, size, margin=0.02, side_room=0.0):
+    """One frame that holds several boxes: their union, `margin` of the picture's longer side all round, and `side_room` of its width more each
+    side (so a later clip with an arm out or a head back still fits), kept inside the picture."""
+    W, H = size; m = round(margin * max(W, H)); r = round(side_room * W)
+    return (max(0, min(b[0] for b in boxes) - m - r), max(0, min(b[1] for b in boxes) - m), min(W, max(b[2] for b in boxes) + m + r), min(H, max(b[3] for b in boxes) + m))
+
+
+def _key_clip(src, start, end, fps, max_side, status=None, crop=None):
+    """A clip filmed on a green screen as cut-out frames, all cropped to one box around everywhere the subject goes. A quick first pass finds that
+    box; then the frames are keyed a couple of seconds at a time, so a long clip never has to sit in memory whole."""
+    probe = video_frames(src, start, end, 8, max_side=max_side)
+    if not probe: raise MediaError("Couldn't read that clip.")
+    key = green_screen_colour(probe[0]); boxes = []
+    for f in probe:
+        b = chroma_key(f, key).getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox()
+        if b: boxes.append(b)
+    if not boxes: raise MediaError("Couldn't find the subject in the clip.")
+    W, H = probe[0].size; m = round(0.02 * max(W, H)); del probe
+    box = (max(0, min(x[0] for x in boxes) - m), max(0, min(x[1] for x in boxes) - m), min(W, max(x[2] for x in boxes) + m), min(H, max(x[3] for x in boxes) + m))
+    if crop:                                      # the same frame as another cut-out, so the two line up exactly
+        own = (min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes))
+        if own[0] < crop[0] - 10 or own[1] < crop[1] - 10 or own[2] > crop[2] + 10 or own[3] > crop[3] + 10:
+            raise MediaError("The character moves outside the frame of the clip it is meant to match (it goes further than the other clips do). Film it nearer the middle, or cut both out again without matching.")
+        box = tuple(crop)
+    out, t = [], start
+    while t < end - 1e-6:
+        if status: status(f"Cutting the character out: {t - start:.0f} of {end - start:.0f} seconds…")
+        out += [chroma_key(f, key).crop(box) for f in video_frames(src, t, min(end, t + 2.0), fps, max_side=max_side)]
+        t += 2.0
+    return out, box, (W, H)
+
+
 def video_cutout(src, params, name=None, status=None):
-    """The clip with its background removed (a transparent WebM), at up to 15 frames a second."""
-    fps = min(15, src.get("fps", 24)); start = float(params.get("start", 0)); end = float(params.get("end", src.get("seconds", 0)))
-    fr = video_frames(src, start, end, fps, max_side=int(params.get("max", 720)))
-    if len(fr) > 15 * 30: raise MediaError("Cut out 30 seconds of a clip at most at a time (choose a start and end).")
-    fr = _cut_frames(fr, params.get("box"), status)
+    """The clip with its background removed (a transparent WebM). A clip filmed on a green screen is keyed (fast, clean, the clip's own frame
+    rate); any other clip has each frame cut out by Segment Anything (slow: at most 15 frames a second, 30 seconds)."""
+    start = float(params.get("start", 0)); end = float(params.get("end", src.get("seconds", 0)))
+    first = video_frames(src, start, start + 0.2, 10, max_side=int(params.get("max", 1280)))
+    keyed = bool(first) and not params.get("box") and green_screen_colour(first[0]) is not None
+    fps = int(params.get("fps") or (min(24, round(src.get("fps", 24))) if keyed else min(15, round(src.get("fps", 24)))))
+    crop = frame = None
+    if keyed:
+        like = get(params["like"]) if params.get("like") else None
+        if params.get("crop"): crop = [int(x) for x in params["crop"]]                          # an exact frame, in the clip's pixels
+        elif like and like.get("crop") and like.get("frame") == [first[0].width, first[0].height]: crop = like["crop"]
+        elif params.get("like"): raise MediaError("That clip can't be matched to the character: it was filmed at a different size. Film it the same way (same camera, same distance).")
+        elif params.get("side_room"):
+            own, size = clip_extent(src, start, end, int(params.get("max", 1280))); crop = frame_around(own, size=size, side_room=float(params["side_room"]))
+        fr, crop, frame = _key_clip(src, start, end, fps, int(params.get("max", 1280)), status, crop)
+    else:
+        fr = video_frames(src, start, end, fps, max_side=int(params.get("max", 1280)))
+        if len(fr) > 15 * 30: raise MediaError("Cut out 30 seconds of a clip at most at a time (choose a start and end).")
+        fr = _cut_frames(fr, params.get("box"), status)
     data, w, h = _encode_webm(fr, fps, True)
     return _store(data, "webm", w, h, True, name or f"{src['name']} (cut out)", params.get("kind") or src["kind"], src.get("description", ""),
                   src["id"], f"remove_background of {src['name']}", None, {"seconds": round(len(fr) / fps, 2), "fps": fps, "poster": 0.0,
-                  "speech": [[max(0, a - start), b - start] for a, b in src.get("speech", []) if b > start and a < end]})
+                  "speech": [[max(0, a - start), b - start] for a, b in src.get("speech", []) if b > start and a < end],
+                  **({"crop": [int(x) for x in crop], "frame": list(frame)} if crop else {})})
+
+
+def video_part(src, params, name=None):
+    """A part of a clip, from `start` to `end` seconds, as a clip of its own (a cut-out clip stays a cut-out)."""
+    secs = float(src.get("seconds", 0)); start = float(params.get("start", 0)); end = float(params.get("end", secs))
+    if not 0 <= start < end <= secs + 0.05: raise MediaError(f"Choose a part of the clip between 0 and {secs:g} seconds, like start 6.9 and end 7.7.")
+    if end - start < 0.3: raise MediaError("A part of a clip needs to be at least a third of a second long.")
+    fps = int(src.get("fps", 24)); fr = video_frames(src, start, end, fps)
+    if not fr: raise MediaError("Couldn't read that part of the clip.")
+    data, w, h = _encode_webm([f.convert("RGBA") for f in fr], fps, bool(src.get("transparent")))
+    return _store(data, "webm", w, h, bool(src.get("transparent")), name or f"{src['name']} ({start:g}–{end:g} s)", params.get("kind") or src["kind"],
+                  src.get("description", ""), src["id"], f"part of {src['name']}", None,
+                  {"seconds": round(len(fr) / fps, 2), "fps": fps, "poster": 0.0,
+                   "speech": [[max(0, a - start), min(end, b) - start] for a, b in src.get("speech", []) if b > start and a < end],
+                   **({"crop": src["crop"], "frame": src["frame"]} if src.get("crop") else {})})
 
 
 def _longest(spans, lo, hi):
@@ -998,10 +1303,30 @@ def _longest(spans, lo, hi):
     return max(spans, key=lambda x: x[1] - x[0]) if spans else None
 
 
+def _busiest(src, a, b, n, fps):
+    """The start (in seconds) of the `n` frames between `a` and `b` where the picture moves the most: for a clip of someone talking, where the mouth
+    works hardest."""
+    import numpy as np
+    best, at = -1.0, a
+    t = a
+    while t + n / fps <= b + 1e-6:
+        fr = video_frames(src, t, t + n / fps, fps, max_side=200)[:n]
+        if len(fr) >= 3:
+            g = [np.asarray(f.convert("L"), np.float32) * (np.asarray(f.convert("RGBA").getchannel("A"), np.float32) / 255) for f in fr]     # luma, where there is a picture
+            move = float(np.mean([np.abs(g[i + 1] - g[i]).mean() for i in range(len(g) - 1)]))
+            if move > best: best, at = move, t
+        t += 0.2
+    return at
+
+
 def video_character(src, params, name=None, status=None):
-    """A talking character made from a clip of it speaking: the idle loop from where it is quiet, the talking loop from where it
-    speaks (both found from the clip's sound unless given as `idle`/`talk` [start, end]). Each loop plays forward then back, so it
-    joins up smoothly, and a slide crossfades between them as the speaker starts and stops."""
+    """A talking character made from a clip of it speaking: the idle loop from where it is quiet, the talking loop from where it speaks (found
+    from the clip's sound unless given as `idle`/`talk` [start, end]). Each loop plays forward then back, so it joins up smoothly. The picture is
+    the clip's own frame, so actions cut from the same clip line up with it exactly. A clip that isn't cut out yet is cut out first."""
+    if not src.get("transparent"):
+        if status: status("Cutting the character out…")
+        cut = video_cutout(src, {"max": int(params.get("max", 1280)), "box": params.get("box"), "side_room": params.get("side_room", 0.08)}, None, status)
+        return video_character(cut, params, name, status)
     secs = src.get("seconds", 0); speech = src.get("speech") or []
     talk = params.get("talk") or (_longest(speech, 0, secs) if speech else None)
     if not talk: raise MediaError("Couldn't tell when the character speaks in this clip (it has no speech). Say which seconds it talks, e.g. talk 4 to 8.")
@@ -1011,26 +1336,18 @@ def video_character(src, params, name=None, status=None):
         t0 = max(t0, b)
     # the quiet stretch nearest the speech: the character holds much the same pose there, so the switch between loops is gentle
     gap = lambda q: max(talk[0] - q[1], q[0] - talk[1], 0)
-    idle = params.get("idle") or min((q for q in quiet if q[1] - q[0] >= 1.0), key=gap, default=_longest(quiet, 0, secs))
-    if not idle or idle[1] - idle[0] < 0.6: idle = (max(0, talk[0] - 1.6), talk[0])
+    idle = params.get("idle") or min((q for q in quiet if q[1] - q[0] >= 0.6), key=gap, default=_longest(quiet, 0, secs))
+    if not idle or idle[1] - idle[0] < 0.4: idle = (max(0, talk[0] - 1.6), talk[0])
     fps, per = int(params.get("fps", 12)), int(params.get("frames", 10))             # frames each way of a loop (few, so each can be sharp)
-    side = int(params.get("max", 1280))
-    def loop(a, b):
+    def loop(a, b, busiest=False):
         n = min(per, max(4, int((b - a) * fps)))
-        mid = (a + b) / 2; a2 = max(a, mid - n / fps / 2)
-        fr = video_frames(src, a2, a2 + n / fps, fps, max_side=side)[:n]
+        a2 = _busiest(src, a, b, n, fps) if busiest and b - a > n / fps + 0.25 else max(a, (a + b) / 2 - n / fps / 2)
+        fr = video_frames(src, a2, a2 + (n + 1) / fps, fps)[:n]                    # (a frame of slack: a window off the clip's frame grid gives one fewer)
         return fr + fr[-2:0:-1]                                                    # forward, then back (without repeating the ends)
-    if status: status("Reading the clip…")
-    idle_f, talk_f = loop(*idle), loop(*talk)
+    if status: status("Making the idle and talking loops…")
+    idle_f, talk_f = loop(*idle), loop(*talk, busiest=True)
     k = min(len(idle_f), len(talk_f)); idle_f, talk_f = idle_f[:k], talk_f[:k]
-    if not src.get("transparent"):
-        both = _cut_frames(idle_f + talk_f, params.get("box"), status, "Cutting the character out")
-        idle_f, talk_f = both[:k], both[k:]
-    else:                                                                          # already cut out: crop both rows to one box
-        boxes = [f.getchannel("A").getbbox() for f in idle_f + talk_f]; boxes = [b for b in boxes if b]
-        b = (min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes))
-        idle_f, talk_f = [f.crop(b) for f in idle_f], [f.crop(b) for f in talk_f]
     data, fw, fh = _sprite_rows([idle_f, talk_f])
     return _store(data, "webp", fw, fh, True, name or f"{src['name']} (character)", params.get("kind") or "mascot", src.get("description", ""),
                   src["id"], f"character from {src['name']}", {"frames": k, "fps": fps, "mode": "character", "rows": 2},
-                  {"speaker": params["speaker"]} if params.get("speaker") else None)
+                  {**({"speaker": params["speaker"]} if params.get("speaker") else {}), **({"crop": src["crop"], "frame": src["frame"]} if src.get("crop") else {})})

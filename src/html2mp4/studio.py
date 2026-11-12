@@ -191,14 +191,26 @@ async def music_upload(file: UploadFile = File(...)):
     return {"music_id": f"upload:{uid}{ext}", "name": file.filename}
 
 
+CHARACTER_SAMPLE = "Hi, I'm Spotter! Ask me anything about your data, and I'll fetch the answer for you."
+
+
+@app.get("/api/voices/characters")
+def character_voices():
+    """The voices made for characters, to choose from for a character in the media library."""
+    return {"voices": [{"id": k, "name": v[0], "description": v[1]} for k, v in cli.CHARACTER_VOICES.items()],
+            "default": cli.voice_spec("puppy")}
+
+
 @app.get("/api/voice-sample/{voice}")
 def voice_sample(voice: str, speed: float = 0.9):
-    if voice not in cli.VOICES: raise HTTPException(404)
-    dst = PREVIEWS / f"voice-{voice}-{speed}.m4a"
+    spec = None if voice in cli.VOICES else cli.voice_spec(voice)               # a narrator voice, or a character voice ("puppy", "puck+4", ...)
+    if voice not in cli.VOICES and (spec is None or voice not in cli.CHARACTER_VOICES): raise HTTPException(404)
+    voice = spec or voice; text = SAMPLE_TEXT if voice in cli.VOICES else CHARACTER_SAMPLE
+    dst = PREVIEWS / f"voice-{voice.replace('|', '@')}-{speed}.m4a"
     if not dst.exists():
-        [[a]] = cli.synthesize([{"chunks": [SAMPLE_TEXT]}], voice, speed, cli.CACHE / "tts")
+        [[a]] = cli.synthesize([{"chunks": [text]}], voice, speed, cli.CACHE / "tts")
         import soundfile as sf
-        tmp = PREVIEWS / f"voice-{voice}-{speed}-{threading.get_ident()}.wav"; PREVIEWS.mkdir(parents=True, exist_ok=True)
+        tmp = PREVIEWS / f"voice-{voice.replace('|', '@')}-{speed}-{threading.get_ident()}.wav"; PREVIEWS.mkdir(parents=True, exist_ok=True)
         sf.write(tmp, a, cli.TTS_SR); to_m4a(tmp, dst); tmp.unlink()
     return FileResponse(dst, media_type="audio/mp4")
 
@@ -590,7 +602,7 @@ def moment_note(m):
     t, rows = 0.6, []
     for i, sl in enumerate(m.slides):
         rows.append(f"s{i + 1} ({sl.title}) starts at about {int(t // 60)}:{int(t % 60):02d}")
-        t += sum(len(x.split()) / 2.2 + 0.45 for x in sl.say) + 0.9
+        t += sum(len(x.split()) / 2.2 + 0.45 for x in sl.say) + 0.9 + 1.6 * len(sl.acts)       # (an action takes a second or two)
     return "Times in the feedback (like 2:51) refer to the finished video. Approximate slide start times: " + "; ".join(rows) + "."
 
 
@@ -878,7 +890,7 @@ def export_module(pid: str, format: str = "json", history: bool = False, v: int 
     except modulefile.ModuleFileError as e: raise HTTPException(404, str(e))
     body = modulefile.dumps(doc, format)
     if inline:                                 # reading, not downloading: an embedded image is a line, not pages of encoded data
-        body = re.sub(r"data:(image|font)/[\w.+-]+;base64,[A-Za-z0-9+/=]{200,}", lambda m: f"<embedded {m.group(1)}, {len(m.group(0)) * 3 // 4 // 1024} KB>", body)
+        body = re.sub(r"data:(image|font|video)/[\w.+-]+;base64,[A-Za-z0-9+/=]{200,}", lambda m: f"<embedded {m.group(1)}, {len(m.group(0)) * 3 // 4 // 1024} KB>", body)
     head = {"Cache-Control": "no-store"}
     if not inline: head["Content-Disposition"] = attachment(modulefile.filename(doc["name"], format))
     return Response(body, media_type="text/plain; charset=utf-8" if inline else ("application/x-yaml" if format == "yaml" else "application/json"), headers=head)
@@ -889,7 +901,12 @@ def export_module(pid: str, format: str = "json", history: bool = False, v: int 
 media_jobs = {}                       # id -> an edit running in the background (removing a background can take a while the first time)
 
 
-def media_view(it): return {**it, "url": f"/api/media/{it['id']}/file", "preview": f"/api/media/{it['id']}/preview", "video": it["format"] in media.VIDEO_FORMATS}
+def media_view(it):
+    view = {**it, "url": f"/api/media/{it['id']}/file", "preview": f"/api/media/{it['id']}/preview", "video": it["format"] in media.VIDEO_FORMATS}
+    if (it.get("animated") or {}).get("mode") == "character":
+        view["actor"] = {"clips": {k: {"clip": c, "seconds": (media.get(c) or {}).get("seconds", 0)} for k, c in (it.get("actions") or {}).items() if media.get(c)},
+                         "motions": list(media.MOTIONS)}
+    return view
 
 
 @app.get("/api/media")
@@ -932,7 +949,7 @@ def media_file(iid: str):
 def media_preview(iid: str):
     """What to show for the image in the Studio: an animation plays (as animated WebP); anything else is a small still."""
     it = _item(iid)
-    try: data, mime = media.export(it, "webp") if it.get("animated") else media.thumb(it, 480)    # a clip's still is its poster frame
+    try: data, mime = media.preview(it, 480 if not it.get("animated") else 420)    # a clip's still is its poster frame
     except media.MediaError as e: raise HTTPException(400, str(e))
     return Response(data, media_type=mime, headers={"Cache-Control": "no-store"})
 
@@ -954,12 +971,36 @@ class MediaPatchIn(BaseModel):
     kind: str | None = None
     description: str | None = None
     speaker: str | None = None                                         # a character speaks as this speaker in scripts ("" = the narrator)
+    voice: str | None = None                                           # the voice a character speaks with ("" = the default character voice)
 
 
 @app.patch("/api/media/{iid}")
 def patch_media(iid: str, body: MediaPatchIn):
     _item(iid)
-    try: return media_view(media.update(iid, body.name, body.kind, body.description, body.speaker))
+    try: return media_view(media.update(iid, body.name, body.kind, body.description, body.speaker, body.voice))
+    except media.MediaError as e: raise HTTPException(400, str(e))
+
+
+class ActionIn(BaseModel):
+    name: str
+    clip: str
+    start: float | None = None                                         # use only this part of the clip (seconds)
+    end: float | None = None
+
+
+@app.post("/api/media/{iid}/actions")
+def add_action(iid: str, body: ActionIn):
+    """Make a clip (or a part of it) one of a character's actions, under a name like `wave` that scripts can ask for ("Spotter animate: wave").
+    A clip filmed on a green screen is cut out to match the character, which takes a little while."""
+    _item(iid)
+    try: return media_view(media.link_action(iid, body.name, body.clip, body.start, body.end))
+    except media.MediaError as e: raise HTTPException(400, str(e))
+
+
+@app.delete("/api/media/{iid}/actions/{name}")
+def remove_action(iid: str, name: str):
+    _item(iid)
+    try: return media_view(media.unlink_action(iid, name))
     except media.MediaError as e: raise HTTPException(400, str(e))
 
 
@@ -1102,7 +1143,7 @@ def align_slides(old_text, new_text):
     ids that need designing. Adding or removing a slide in the middle therefore doesn't redesign the slides after it."""
     import difflib
     old, new = script.parse(old_text), script.parse(new_text)
-    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers))
+    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers), tuple((a['at'], a['who'], a['do']) for a in s.acts), tuple(s.shown))
     remap, changed = {}, []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [key(x) for x in old.slides], [key(x) for x in new.slides], autojunk=False).get_opcodes():
         if op == "equal":

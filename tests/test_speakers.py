@@ -31,10 +31,10 @@ def test_a_script_names_a_second_speaker_and_gives_it_lines():
     assert list(zip(b.say, b.speakers)) == [("So what do we build?", ""), ("At the core is an agent.", ""), ("Woof.", "Spotter"), ("That's me.", "Spotter")]
     m2 = script.parse("Title: T\nVoice: Max = am_echo\n## A\nSay: Hello there.\nMax: Hi! I am here.\nSay: Bye.\n## B\nSay: Only me.\n")
     assert m2.voices == {"Max": "am_echo"} and m2.slides[0].speakers == ["", "Max", ""] and m2.slides[1].speakers == []
-    assert script.parse("Title: T\nVoice: Max\n## A\nSay: Hi.\n").voices == {"Max": "am_puck"}         # a playful voice unless one is named
+    with pytest.raises(script.ScriptError, match="not sure what this is"): script.parse("Title: T\nVoice: Max\n## A\nSay: Hi.\n")   # a "Voice:" line needs "= a voice"
     assert script.parse("Title: T\n## A\nSay: Hi.\nNote: Max: not a speaker here\n").slides[0].speakers == []   # nobody declared: nobody else speaks
     with pytest.raises(script.ScriptError, match="no voice called"): script.parse("Title: T\nVoice: Max = Gandalf\n## A\nSay: Hi.\n")
-    assert "(Spotter speaks)" in design._scenes_text(m, ["s1"]).splitlines()[-1]
+    assert "voice only" in design._scenes_text(m, ["s1"]).splitlines()[-1]
 
 
 def test_the_page_says_who_speaks_and_the_video_voices_each_speaker(tmp_path, monkeypatch):
@@ -158,8 +158,8 @@ def test_a_subject_on_a_plain_backdrop_is_found_without_a_box():
 
 def test_the_assistant_and_the_designer_know_about_speakers_and_clips():
     from html2mp4 import chat
-    assert "Voice: NAME = VOICE" in chat.SYSTEM and "character" in json.dumps(chat.SCHEMA) and "Video clips" in chat.SYSTEM
-    assert "(NAME speaks)" in design.SYSTEM and "video clip" in design.SYSTEM
+    assert "`NAME animate:" in chat.SYSTEM and "character" in json.dumps(chat.SCHEMA) and "Video clips" in chat.SYSTEM
+    assert "voice only" in design.SYSTEM and "video clip" in design.SYSTEM
 
 
 def test_a_library_image_keeps_the_designers_class_whatever_quotes_it_used():
@@ -170,3 +170,24 @@ def test_a_library_image_keeps_the_designers_class_whatever_quotes_it_used():
     still = media.add(_png(), "Logo.png")
     html, _ = media.resolve(f"<img class='lg' data-asset='{still['id']}' alt='Our logo'>")
     assert html.count("class=") == 1 and 'alt="Our logo"' in html
+
+
+def test_a_green_screen_frame_becomes_a_soft_cut_out_without_a_green_fringe():
+    W, H = 200, 140; key = (102, 255, 51)                                 # a lime screen, like the one the video tool made
+    yy, xx = np.mgrid[:H, :W]; d = np.sqrt((xx - 100) ** 2 + (yy - 70) ** 2)
+    cov = np.clip(40 - d, 0, 1)                                           # a disc with a one-pixel soft edge
+    fur = np.array([240, 225, 200]); armour = np.array([39, 174, 196])
+    body = np.where((xx < 100)[..., None], fur, armour)                    # cream fur on the left, teal armour on the right
+    px = cov[..., None] * body + (1 - cov[..., None]) * np.array(key)
+    shadow = (yy > 118) & (np.abs(xx - 100) < 60)                          # a darker green patch on the screen: a shadow
+    px[shadow & (cov == 0)] = np.array(key) * 0.55
+    im = Image.fromarray(px.astype(np.uint8))
+    assert media.green_screen_colour(im) == pytest.approx(tuple(c / 255 for c in key), abs=0.02)
+    out = np.asarray(media.chroma_key(im)).astype(int); a = out[..., 3]
+    assert a[70, 75] == 255 and a[70, 125] == 255 and a[5, 5] == 0         # fur and armour are kept, the screen goes
+    assert a[125, 60] == 0 and a[125, 140] == 0                            # and so does a shadow on the screen
+    edge = (a > 10) & (a < 245)
+    assert edge.sum() > 20
+    assert (out[..., 1][a > 10] <= np.maximum(out[..., 0], out[..., 2])[a > 10] + 8).all()        # no green is left in the colours
+    assert abs(out[70, 75, 0] - 240) < 6 and abs(out[70, 125, 2] - 196) < 6                          # and the colours themselves are untouched
+    assert media.green_screen_colour(Image.new("RGB", (80, 60), (240, 240, 240))) is None          # a white backdrop isn't a green screen

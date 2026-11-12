@@ -44,8 +44,15 @@ class Slide:
     hold: float | None = None                               # extra seconds the finished slide stays up (None: the Studio's pacing setting)
     images: list = dataclasses.field(default_factory=list)  # names of media-library images this slide should show ("Image:")
     speakers: list = dataclasses.field(default_factory=list)  # who says each sentence of `say` ("" = the narrator)
+    acts: list = dataclasses.field(default_factory=list)      # what a character does between sentences: {"at": sentence index it comes before, "who": name, "do": text}
+    shown: list = dataclasses.field(default_factory=list)     # indices of sentences a character says that are also printed on the slide (a speech bubble)
 
     def speaker(self, i): return self.speakers[i] if i < len(self.speakers) else ""
+
+    def cast(self):
+        """The characters that speak or act on this slide, in order of first appearance."""
+        names = [w for w in self.speakers if w] + [a["who"] for a in self.acts]
+        return list(dict.fromkeys(names))
 
 
 @dataclasses.dataclass
@@ -54,8 +61,10 @@ class Module:
     subtitle: str = ""
     intro: list = dataclasses.field(default_factory=list)     # narration for the title slide
     slides: list = dataclasses.field(default_factory=list)
-    voices: dict = dataclasses.field(default_factory=dict)   # speaker name -> voice id, from "Voice:" lines
+    voices: dict = dataclasses.field(default_factory=dict)   # character name -> voice spec (None: the character's own voice from the media library)
     intro_speakers: list = dataclasses.field(default_factory=list)
+    intro_acts: list = dataclasses.field(default_factory=list)
+    intro_shown: list = dataclasses.field(default_factory=list)
 
     @property
     def sentences(self): return len(self.intro) + sum(len(s.say) for s in self.slides)
@@ -77,40 +86,100 @@ def parse_hold(value, n):
     seconds = float(m.group(1))
     if seconds > MAX_HOLD: raise ScriptError(f"Line {n}: 'Hold:' can be at most {MAX_HOLD:g} seconds.")
     return seconds
-VOICE_LINE = re.compile(r"^voice\s*:\s*([^=:]{1,30}?)\s*(?:=\s*(.+?))?\s*$", re.I)
-DEFAULT_CHARACTER_VOICE = "am_puck"
+# A character is declared with "Voice: Spotter = Puppy" (a voice, optionally "Puppy, pitch +2, pace 1.1"), or simply by using it:
+# a line "Spotter say: …" / "Spotter animate: …" introduces it (it then speaks with the voice set in the media library).
+VOICE_LINE = re.compile(r"^voice\s*:\s*([^=:]{1,30}?)\s*=\s*(.+?)\s*$", re.I)
+DEFAULT_CHARACTER_VOICE = "puppy"
+NAME = r"[A-Z][A-Za-z0-9'’-]{1,19}"
+NOT_NAMES = {"narrator", "narration", "scene", "note", "show", "say", "title", "subtitle", "hold", "image", "visual", "voice", "on", "the", "we", "you", "it", "he", "she", "they", "this", "that", "here"}
+# "Spotter say hello" / "Spotter animate wink" work without a colon; the other forms (and the third-person "says") need one,
+# so a narration sentence that happens to begin with the name is never taken for an instruction.
+_PLAIN, _COLON = "say|speak|bubble|caption|animate|act", "says|speaks|bubbles|captions|animates|acts|print|prints|write|writes|type|types|perform|performs"
+KIND_OF = {"say": "say", "says": "say", "speak": "say", "speaks": "say", "bubble": "bubble", "bubbles": "bubble", "caption": "bubble", "captions": "bubble",
+           "print": "bubble", "prints": "bubble", "write": "bubble", "writes": "bubble", "type": "bubble", "types": "bubble",
+           "animate": "act", "animates": "act", "act": "act", "acts": "act", "perform": "act", "performs": "act"}
+AUTO_ACTOR = re.compile(rf"^({NAME})\s+(?:{_PLAIN}|{_COLON})\s*:|^({NAME})\s*:\s*(?:animate|animates|act|acts)\b", re.I)
 
 
 def voice_id(value, n=0):
-    """'Puck', 'am_puck' or 'puck' -> the voice id. Any narrator or character voice can be named."""
-    from html2mp4.cli import VOICES, CHARACTER_VOICES
-    every = {**VOICES, **CHARACTER_VOICES}
-    v = (value or "").strip().strip('"“”').lower()
-    if not v: return DEFAULT_CHARACTER_VOICE
-    if v in every: return v
-    for vid, (name, _) in every.items():
-        if name.lower() == v: return vid
-    raise ScriptError(f"Line {n}: there's no voice called “{value}”. Choose one of: {', '.join(n for n, _ in every.values())}.")
+    """A voice spec from what a script says: 'Puppy', 'Puck', 'am_puck', or with changes, 'Puck, pitch +4, pace 1.1' (or 'Puck +4').
+    The spec is 'base voice' alone, or 'base|semitones|pace'. A narrator voice or a character voice can be named."""
+    from html2mp4 import cli
+    text = (value or "").strip().strip('"“”')
+    if not text: return cli.voice_spec(DEFAULT_CHARACTER_VOICE)
+    pitch = pace = None
+    m = re.search(r"(?:,|\s)\s*(?:pitch\s*)?([+-]\d+(?:\.\d+)?)(?:\s*(?:semitones?|st))?\s*(?=,|$)", text, re.I)
+    if m: pitch = float(m.group(1)); text = (text[:m.start()] + text[m.end():]).strip(" ,")
+    m = re.search(r"(?:,|\s)\s*(?:pace|speed|rate)\s*[:x ]?\s*(\d+(?:\.\d+)?)x?\s*(?=,|$)", text, re.I)
+    if m: pace = float(m.group(1)); text = (text[:m.start()] + text[m.end():]).strip(" ,")
+    spec = cli.voice_spec(text.strip(" ,"))
+    if spec is None:
+        names = [v[0] for v in cli.VOICES.values()] + [v[0] for v in cli.CHARACTER_VOICES.values()]
+        raise ScriptError(f"Line {n}: there's no voice called “{value}”. Choose one of: {', '.join(names)}.")
+    base, p0, k0 = cli.split_voice(spec)
+    if pitch is not None: p0 = pitch
+    if pace is not None:
+        if not 0.5 <= pace <= 1.6: raise ScriptError(f"Line {n}: pace is a speed from 0.5 to 1.6, like 'pace 1.1'.")
+        k0 = pace
+    return cli.join_voice(base, p0, k0)
 
 
-def voices_in(text):
-    """The speakers a script declares with "Voice: Name = voice", as {name: voice id}."""
-    out = {}
+def _declared(text):
+    """The characters a script names, as {name: voice spec or None}, from "Voice:" lines and from lines that address a character."""
+    out, seen = {}, {}
+    def add(name, spec=None):
+        key = name.lower()
+        if key in seen:
+            if spec is not None: out[seen[key]] = spec
+            return
+        seen[key] = name; out[name] = spec
     for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
-        m = VOICE_LINE.match(raw.strip())
+        line = raw.strip()
+        m = VOICE_LINE.match(line)
         if m:
             name = " ".join(m.group(1).split())
-            if name.lower() in ("narrator", "narration", "over"): raise ScriptError(f"Line {n}: the narrator's voice is chosen in Settings; 'Voice:' names a second speaker, like 'Voice: Spotter = Puck'.")
-            out[name] = voice_id(m.group(2), n)
+            if name.lower() in ("narrator", "narration", "over"): raise ScriptError(f"Line {n}: the narrator's voice is chosen in Settings; 'Voice:' names a second speaker, like 'Voice: Spotter = Puppy'.")
+            if not re.fullmatch(NAME.replace("{1,19}", "{0,28}"), name): raise ScriptError(f"Line {n}: a character's name is one word starting with a capital letter, like 'Spotter'.")
+            add(name, voice_id(m.group(2), n)); continue
+        m = AUTO_ACTOR.match(line)
+        if m:
+            name = m.group(1) or m.group(2)
+            if name.lower() not in NOT_NAMES: add(name)
     return out
 
 
-def speaker_line(line, voices):
-    """'Spotter: Hi there' -> ("Spotter", "Hi there") when Spotter is a declared speaker; None otherwise."""
+def voices_in(text): return _declared(text)
+
+
+def actor_line(line, voices):
+    """(name, 'say' | 'bubble' | 'act', text) for a line addressed to a declared character, or None.
+    'Spotter say: Hi' / 'Spotter say Hi' / 'Spotter: Hi' speak; 'Spotter bubble: Hi' speaks and prints it; 'Spotter animate: wink' acts."""
     for name in voices:
-        m = re.match(rf"^{re.escape(name)}\s*(?:says)?\s*:\s*(.*)$", line, re.I)
-        if m: return name, m.group(1)
+        n = re.escape(name)
+        m = re.match(rf"^{n}\s+(?:({_PLAIN})\b\s*:?|({_COLON})\s*:)\s*(.*)$", line, re.I)
+        if m: return name, KIND_OF[(m.group(1) or m.group(2)).lower()], m.group(3).strip()
+        m = re.match(rf"^{n}\s*:\s*(animate|animates|act|acts|perform|performs)\b\s*:?\s*(.*)$", line, re.I)
+        if m: return name, "act", m.group(2).strip()
+        m = re.match(rf"^{n}\s*:\s*(.*)$", line, re.I)
+        if m: return name, "say", m.group(1).strip()
     return None
+
+
+def _speaker_add(m, slide, who, kind, value, n, split=False):
+    """Record a line a character says or does on `slide` (None: before the first slide). `value` may still hold the quotes."""
+    text = _unquote(value)
+    if not text: raise ScriptError(f"Line {n}: “{who} {'animate' if kind == 'act' else 'say'}:” has nothing after it" +
+                                    (": say what the animation should be, like “wave” or “wag his tail”." if kind == "act" else "."))
+    say, speakers, acts, shown = (slide.say, slide.speakers, slide.acts, slide.shown) if slide else (m.intro, m.intro_speakers, m.intro_acts, m.intro_shown)
+    if kind == "act":
+        if not re.search(r"[A-Za-z]", text): raise ScriptError(f"Line {n}: say what {who} should do, like “{who} animate: wave”.")
+        acts.append({"at": len(say), "who": who, "do": " ".join(text.split())}); return 0
+    pieces = split_sentences(text) if split else [text]
+    speakers += [""] * (len(say) - len(speakers))
+    for t in pieces:
+        speakers.append(who); say.append(t)
+        if kind == "bubble": shown.append(len(say) - 1)
+    return len(pieces)
 SCENE = re.compile(r"^scene\s+(\d+)\s*[:.\-–—]\s*(.*?)\s*(?:\(([^)]*\d:\d\d[^)]*)\))?\s*$", re.I)
 NARRATION = re.compile(r"^(?:narration|narrator|voice[- ]?over|vo|script|says?)\s*:\s*(.*)$", re.I)
 QUOTES = ('"', '“', '”')
@@ -169,13 +238,11 @@ def parse(text, title=None, subtitle=None):
             last = None if not line else last
             continue
         if VOICE_LINE.match(line): last = None; continue
-        sp = speaker_line(line, m.voices)
+        sp = actor_line(line, m.voices)
         if sp:
-            who, value = sp; value = _unquote(value)
-            if not value: raise ScriptError(f"Line {n}: '{who}:' has no text.")
-            if slide: slide.say.append(value); slide.speakers += [""] * (len(slide.say) - 1 - len(slide.speakers)) + [who]
-            else: m.intro.append(value); m.intro_speakers += [""] * (len(m.intro) - 1 - len(m.intro_speakers)) + [who]
-            last = ("say", slide); continue
+            who, kind, value = sp
+            _speaker_add(m, slide, who, kind, value, n)
+            last = ("say", slide) if kind != "act" else None; continue
         if line.startswith("## "):
             slide = Slide(title=line[3:].strip()); m.slides.append(slide); last = None
             if not slide.title: raise ScriptError(f"Line {n}: a slide heading needs a title after '##'.")
@@ -229,7 +296,9 @@ def parse(text, title=None, subtitle=None):
 
 def _even(m):
     """Every sentence has a speaker entry ("" = the narrator), and a module with nobody else speaking has none at all."""
-    for s in m.slides: s.speakers = (s.speakers + [""] * len(s.say))[:len(s.say)] if any(s.speakers) else []
+    for s in m.slides:
+        s.speakers = (s.speakers + [""] * len(s.say))[:len(s.say)] if any(s.speakers) else []
+        for a in s.acts: a["at"] = min(a["at"], len(s.say))
     m.intro_speakers = (m.intro_speakers + [""] * len(m.intro))[:len(m.intro)] if any(m.intro_speakers) else []
 
 
@@ -262,19 +331,24 @@ def _parse_scenes(text, title, subtitle):
         if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
             slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
         in_screen = False
-        who = quoted or ""
+        who, kind = quoted or ("", "say")                               # inside a quote that opened on an earlier line, it is still that character
         nar = NARRATION.match(line)
-        sp = speaker_line(line, m.voices)
-        if nar: line, who = nar.group(1), ""                            # "Narration: …" labels what is said; it isn't said itself
-        elif sp: who, line = sp
+        sp = None if quoted else actor_line(line, m.voices)
+        if nar: line, who, kind = nar.group(1), "", "say"               # "Narration: …" labels what is said; it isn't said itself
+        elif sp:
+            who, kind, line = sp
+            if kind == "act": _speaker_add(m, slide, who, "act", line, n); continue
         opens = line[:1] in QUOTES and sum(line.count(q) for q in QUOTES) == 1
         closes = line[-1:] in QUOTES and sum(line.count(q) for q in QUOTES) == 1
-        quoted = who if opens else (None if closes else quoted)
-        line = _unquote(line)
-        if line:
-            said = split_sentences(line)
-            slide.speakers += [""] * (len(slide.say) - len(slide.speakers)) + [who] * len(said)
-            slide.say += said
+        quoted = (who, kind) if (opens and who) else (None if closes else quoted)
+        if who:
+            _speaker_add(m, slide, who, kind, line, n, split=True)
+        else:
+            line = _unquote(line)
+            if line:
+                said = split_sentences(line)
+                slide.speakers += [""] * (len(slide.say) - len(slide.speakers)) + [""] * len(said)
+                slide.say += said
     if head:
         first = head[0]
         m.title = re.sub(r"^(?:one\s+)?micro-?learning\s*[:\-–—]\s*", "", first, flags=re.I).strip()

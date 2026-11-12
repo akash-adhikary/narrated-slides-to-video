@@ -431,6 +431,18 @@ Note: three cards, left to right</pre>
       <label class="md-l">Kind<select id="mdKind"></select></label>
       <label class="md-l">Description <small>(what the slide designer reads)</small><textarea id="mdDesc" rows="3" maxlength="400"></textarea></label>
       <label class="md-l" id="mdSpeakerL">Speaks as <small>(a speaker in the script, e.g. Spotter; empty: the narrator)</small><input id="mdSpeaker" maxlength="30" autocomplete="off" placeholder="The narrator"></label>
+      <label class="md-l" id="mdVoiceL">Voice <small>(what it sounds like when it speaks in a script)</small>
+        <span class="md-voice"><select id="mdVoice"></select><button class="link" type="button" id="mdVoiceTry">Listen</button></span></label>
+      <div class="md-actions" id="mdActions" hidden>
+        <h4>What it can do <small>a script asks for these: “Spotter animate: wave”</small></h4>
+        <div class="md-chips" id="mdActionList"></div>
+        <div class="md-row"><select id="mdActClip" aria-label="A clip to add as an action"></select><input id="mdActName" maxlength="24" placeholder="name, e.g. wave" autocomplete="off"><button class="btn-2 sm" type="button" id="mdActAdd">Add</button></div>
+      </div>
+      <div class="md-actions" id="mdClipTools" hidden>
+        <h4>Use this clip <small>as an action, or cut a part of it</small></h4>
+        <div class="md-row"><select id="mdClipActor" aria-label="The character it is an action of"></select><input id="mdClipAs" maxlength="24" placeholder="action name, e.g. wink" autocomplete="off"><button class="btn-2 sm" type="button" id="mdClipLink">Add as action</button></div>
+        <div class="md-row"><input id="mdPartFrom" type="number" min="0" step="0.1" placeholder="from (s), optional" title="Use only this part of the clip: from second…"><input id="mdPartTo" type="number" min="0" step="0.1" placeholder="to (s), optional" title="…to second"><button class="link" type="button" id="mdPartGo" title="Makes a new clip of just this part">Cut this part as a new clip</button></div>
+      </div>
       <div class="md-meta" id="mdMeta"></div>
       <div class="md-row"><button class="btn-2 sm" type="button" id="mdSave">Save</button><button class="link" type="button" id="mdDescribe" title="Claude looks at the image and describes it">Describe with Claude</button></div>
       <h4>Edit <small>each edit makes a new image</small></h4>

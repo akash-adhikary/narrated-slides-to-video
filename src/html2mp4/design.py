@@ -8,7 +8,7 @@ narration list, footer), the checker renders every narration step, and anything 
 failing step's screenshot, for up to two fix rounds. The narration itself never comes from Claude: it is copied
 from the script.
 """
-import base64, concurrent.futures, dataclasses, re, threading, time
+import base64, concurrent.futures, dataclasses, html, re, threading, time
 
 from html2mp4 import ai, compose, config, verify
 
@@ -88,10 +88,13 @@ only pictures you can use: `<img data-asset="ID" alt="what it shows" class="..."
   background; an opaque photo sits in a card or panel with rounded corners.
 - An image marked "talks" is a character whose mouth moves while the narrator speaks: use it as the presenter (beside the text,
   facing the content). It can take data-c like any element; don't add data-fx="pop" to it, a gentle entrance reads better.
-- Some narration steps are said by a second speaker (a character, marked "(NAME speaks)"). An image that "talks while NAME speaks"
-  is that character: on a slide where it speaks, show it large enough to be a real presence (about a third of the slide's height or
-  more), on its own side, and have it appear with data-c="0" so it is already there when it starts talking. Give the text or a
-  speech bubble for its line room beside it. Where the narrator speaks and the character only listens, it can be smaller.
+- A character from the media library can be on a slide: one marked "speaks as NAME". The script tells you when it speaks or acts here.
+  A step marked "(NAME says this: voice only)" is spoken aloud by the character and its words must NOT appear anywhere on the slide: no
+  speech bubble, no caption, no quote, not even reworded. Only a step marked "(NAME says this and it is PRINTED)" is shown, word for word,
+  in a speech bubble beside the character, appearing with data-c set to that step's number. Show the character large enough to be a real
+  presence (about 40 percent of the slide's height or more), on its own side and anchored to the bottom or a corner, appearing with
+  data-c="0" so it is already there when it first speaks or acts; keep the space around it clear (it jumps and waves). The actions listed
+  for a slide ("before step 3: wave") need nothing drawn: they play on the character itself. Where only the narrator speaks it can be smaller.
 - A "video clip" plays silently from the moment its slide appears: put it in a rounded panel (a cut-out clip can stand on the
   background), sized with CSS width, and give it data-c="0" so it starts with the slide. Never more than one clip on a slide.
 
@@ -253,8 +256,20 @@ def _scenes_text(module, ids):
         if s.screen: lines.append(f"The author's description of what should be on screen: {s.screen}")
         if s.note: lines.append(f"Design note: {s.note}")
         if s.images: lines.append("Show these images from the media library: " + ", ".join(s.images))
+        if s.cast():
+            from html2mp4 import media
+            for who in s.cast():
+                it = media.actor(who)
+                lines.append(f"Character on this slide: {who}" + (f" (image ID `{it['id']}`: show it with <img data-asset=\"{it['id']}\" alt=\"{who}\" ...>)" if it else
+                                                                 " (there is no library image for it yet: leave it out)"))
         lines.append("Narration steps:")
-        lines += [f"  {i}: {t}" + (f"   ({s.speaker(i)} speaks)" if s.speaker(i) else "") for i, t in enumerate(s.say)]
+        for i, t in enumerate(s.say):
+            who = s.speaker(i)
+            tag = "" if not who else (f"   ({who} says this and it is PRINTED: show it word for word in a speech bubble with data-c=\"{i}\")" if i in s.shown
+                                       else f"   ({who} says this: voice only, never write these words on the slide)")
+            lines.append(f"  {i}: {t}{tag}")
+        if s.acts:
+            lines.append("Characters act between the sentences (nothing to draw): " + "; ".join(f"before step {a['at']}: {a['who']} {a['do']}" if a["at"] < len(s.say) else f"after the last step: {a['who']} {a['do']}" for a in s.acts))
         out.append("\n".join(lines))
     return "\n\n".join(out)
 
@@ -529,8 +544,48 @@ def _check(module, brand, slides, banned, motion="lively", script_text=None, glo
     page = compose.assemble(module, brand, [(slides[s]["layout"], slides[s]["html"]) for s in ids], "\n".join(slides[s]["css"] for s in ids),
                             motion=motion, project=project)
     for sid, msg in compose.check_detailed(page, module): issues.append(verify.Issue(sid, 0, "narration", "error", msg))
+    issues += _character_issues(module, slides)
     r = verify.inspect(page, module, banned)
     return page, issues + r["issues"], r["shots"]
+
+
+def _visible_words(inner):
+    text = re.sub(r"<(script|style)\b.*?</\1>", " ", inner, flags=re.S | re.I)
+    return re.findall(r"[a-z0-9']+", html.unescape(re.sub(r"<[^>]+>", " ", text)).lower().replace("’", "'"))
+
+
+def _printed(sentence, slide_words):
+    """Whether a sentence's words are on the slide: the whole sentence, or any run of four of its words in a row."""
+    w = re.findall(r"[a-z0-9']+", sentence.lower().replace("’", "'"))
+    if len(w) < 3: return False
+    n = min(4, len(w)); grams = {tuple(slide_words[i:i + n]) for i in range(len(slide_words) - n + 1)}
+    return any(tuple(w[i:i + n]) in grams for i in range(len(w) - n + 1))
+
+
+def _character_issues(module, slides):
+    """What a script asks of its characters, checked against the slides: a character that speaks or acts is on the slide, its voice-only lines are
+    not printed, its printed lines are, and every animation asked for is one the character can do."""
+    from html2mp4 import media
+    out, ids = [], slide_ids(module)
+    for sid, sl in zip(ids, module.slides):
+        if sid not in slides or not sl.cast(): continue
+        inner = slides[sid]["html"]; words = _visible_words(inner)
+        for who in sl.cast():
+            it = media.actor(who)
+            if it is None: out.append(verify.Issue(sid, 0, "character", "warn", f"{sid}: there is no character in the media library that speaks as “{who}”, so it can't appear. Set “Speaks as” on its image in Settings > Media library.")); continue
+            if f'data-asset="{it["id"]}"' not in inner and f"data-asset='{it['id']}'" not in inner:
+                out.append(verify.Issue(sid, 0, "character", "error", f"{sid}: {who} speaks or acts here but isn't on the slide. Show him with <img data-asset=\"{it['id']}\" alt=\"{who}\" data-c=\"0\"> (large, on his own side)."))
+        for i, text in enumerate(sl.say):
+            who = sl.speaker(i)
+            if not who: continue
+            if i in sl.shown and not _printed(text, words):
+                out.append(verify.Issue(sid, i + 1, "character", "error", f"{sid}: {who}'s line “{text}” is marked to be printed but isn't on the slide: show it word for word in a speech bubble with data-c=\"{i}\"."))
+            elif i not in sl.shown and _printed(text, words):
+                out.append(verify.Issue(sid, i + 1, "character", "error", f"{sid}: {who}'s line “{text}” is spoken only, but its words are printed on the slide. Take the text out (no speech bubble or caption for it)."))
+    for sid, who, phrase in media.cast_for(module)["unknown"]:
+        it = media.actor(who); have = ", ".join(a for a in (media.actions_of(it) if it else media.MOTIONS))
+        out.append(verify.Issue(sid, 0, "character", "warn", f"{sid}: {who} can't “{phrase}”, so it is skipped. {who} can: {have}."))
+    return out
 
 
 def _critique(run, module, brand_text, shots, slides):

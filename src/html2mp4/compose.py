@@ -279,7 +279,35 @@ def basic_slide(slide):
     return "basic", f'<h2 data-c="0">{esc(slide.title)}</h2>{body}'
 
 
+MOTION_JS = r"""
+// Built-in motions of a character's picture (jump, nod...): u runs 0..1 over the motion; each gives [lift (of the picture's height), width, height,
+// tilt (degrees), sideways]. The page's player and the video renderer both use these, so they match frame for frame.
+var H2M_MOTION = (function(){
+  var sm = function(x){ x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }, env = function(u){ return Math.sin(Math.PI * u); };
+  return {
+    jump: function(u){                                   // crouch, spring, hang, land, settle
+      var crouch = sm(u / 0.14) * (1 - sm((u - 0.14) / 0.08)), land = sm((u - 0.78) / 0.07) * (1 - sm((u - 0.88) / 0.1));
+      var v = Math.max(0, Math.min(1, (u - 0.18) / 0.62)), lift = 0.3 * 4 * v * (1 - v), stretch = Math.sin(Math.PI * v) * 0.07;
+      return [lift, 1 + 0.08 * crouch + 0.07 * land - stretch * 0.5, 1 - 0.12 * crouch - 0.1 * land + stretch, 0, 0];
+    },
+    hop: function(u){ var lift = 0.12 * Math.abs(Math.sin(Math.PI * u)), sq = Math.pow(1 - Math.abs(Math.sin(Math.PI * u)), 3) * 0.06; return [lift, 1 + sq * 0.6, 1 - sq, 0, 0]; },
+    nod: function(u){ var dip = Math.max(0, Math.sin(4 * Math.PI * u)) * env(u); return [0, 1 + 0.01 * dip, 1 - 0.045 * dip, 1.2 * dip, 0]; },
+    shake: function(u){ return [0, 1, 1, 5 * Math.sin(6 * Math.PI * u) * env(u), 0]; },
+    bounce: function(u){ var b = Math.abs(Math.sin(3 * Math.PI * u)) * env(Math.min(1, u * 1.1)); return [0.1 * b, 1 + 0.03 * (1 - b), 1 - 0.05 * (1 - b) * env(u), 0, 0]; },
+    wiggle: function(u){ var w = Math.sin(8 * Math.PI * u) * env(u); return [0, 1 + 0.025 * w, 1, 4 * w, 0.01 * w]; },
+    spin: function(u){ var c = Math.cos(2 * Math.PI * u); return [0.04 * env(u), (c < 0 ? -1 : 1) * Math.max(0.06, Math.abs(c)), 1, 0, 0]; }
+  };
+})();
+function h2mMotion(name, u){
+  var f = H2M_MOTION[name]; if (!f) return '';
+  var m = f(Math.max(0, Math.min(1, u)));
+  return 'translate(' + (m[4] * 100).toFixed(2) + '%,' + (-m[0] * 100).toFixed(2) + '%) rotate(' + m[3].toFixed(2) + 'deg) scale(' + m[1].toFixed(4) + ',' + m[2].toFixed(4) + ')';
+}
+"""
+
+
 PLAYER_JS = r"""/*h2m:player-js*/
+/*h2m:motion-here*/
 (function(){
   var flat = [], LEAD = 0.25;                       // a word-timed graphic starts this early, so it is readable as the word is heard
   scenes.forEach(function(s, si){ s.chunks.forEach(function(t, ci){ flat.push([si, ci, t]); }); });
@@ -305,8 +333,52 @@ PLAYER_JS = r"""/*h2m:player-js*/
     stage.classList.toggle('speaking', !!on);      // speaker's character only while that speaker talks
     var w = on ? whoNow() : ''; if (w) stage.setAttribute('data-speaker', w); else stage.removeAttribute('data-speaker');
   }
-  function stopAudio(){ talking(false); try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
+  function stopAudio(){ talking(false); stopActs(); try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
   function dropPreload(){ if (nextAudio) { nextAudio.onerror = null; nextAudio = null; } }
+
+  // ---- characters that act. An action is a clip of the character or a built-in motion of its picture (jump, nod...); it happens between two
+  // sentences, as a beat of its own: the narration waits for it. (The video follows the same rule, with the same durations.)
+  var cast = {}; try { cast = JSON.parse(document.getElementById('h2m-cast').textContent) || {}; } catch (e) {}
+  var acting = null;
+  function actorEl(si, name){ var root = document.getElementById(scenes[si].id); return root && root.querySelector('[data-speaker="' + name + '"]'); }
+  function actsAt(si, ci){                         // what happens before sentence `ci` of slide `si`; an action of a character that isn't on the slide is skipped
+    var row = ((cast.acts || {})[scenes[si].id] || {})[ci] || [];
+    return row.filter(function(a){ return actorEl(si, a[0]); });
+  }
+  function spriteOf(el){ return el.classList.contains('h2m-sprite') ? el : (el.querySelector('.h2m-sprite') || el); }
+  function openSlide(si){                          // a slide that opens with an action shows up with its characters, before the first sentence
+    scenes.forEach(function(s, i){
+      var el = document.getElementById(s.id), was = el.classList.contains('active'); el.classList.toggle('active', i === si);
+      if (i === si && !was) clipsStart(el); if (i !== si && was) clipsStop(el);
+    });
+    [].forEach.call(document.getElementById(scenes[si].id).querySelectorAll('[data-speaker]'), function(e){
+      for (var n = e; n && n !== stage; n = n.parentElement) if (n.hasAttribute && n.hasAttribute('data-c')) n.classList.add('on');
+    });
+  }
+  function stopActs(){
+    if (acting) { cancelAnimationFrame(acting.raf); acting = null; }
+    [].forEach.call(stage.querySelectorAll('.h2m-actor.acting'), function(e){ e.classList.remove('acting'); });
+    [].forEach.call(stage.querySelectorAll('video.h2m-act'), function(v){ v.classList.remove('on'); v.pause(); });
+    [].forEach.call(stage.querySelectorAll('.h2m-sprite'), function(e){ e.style.transform = ''; e.style.transition = ''; });
+  }
+  function runActs(my, si, list, then){
+    var i = 0;
+    (function next(){
+      if (token !== my) return;
+      if (i >= list.length) { then(); return; }
+      var a = list[i++], el = actorEl(si, a[0]), info = (((cast.actors || {})[a[0]] || {}).actions || {})[a[1]] || {}, dur = info.seconds || 1, t0 = performance.now();
+      var sprite = spriteOf(el), vid = info.kind === 'clip' ? el.querySelector('video[data-act="' + a[1] + '"]') : null;
+      if (vid) { el.classList.add('acting'); vid.classList.add('on'); vid.playbackRate = rate; try { vid.currentTime = 0; } catch (e) {} var p = vid.play(); if (p && p.catch) p.catch(function(){}); }
+      acting = {raf: 0};
+      (function tick(){
+        if (token !== my) return;
+        var u = (performance.now() - t0) / 1000 * rate / dur;
+        if (u >= 1) { stopActs(); timers.push(setTimeout(next, 120 / rate)); return; }
+        if (!vid) { sprite.style.transition = 'none'; sprite.style.transform = h2mMotion(a[1], u); }
+        if (acting) acting.raf = requestAnimationFrame(tick);
+      })();
+    })();
+  }
 
   // ---- what is on screen at a step. live = while narrating: cued things wait for their word; otherwise they use an estimate.
   // A sentence that brings one graphic shows it as the sentence starts. Only a sentence that names several things in turn
@@ -347,6 +419,11 @@ PLAYER_JS = r"""/*h2m:player-js*/
 
   // ---- narrating
   function after(my){
+    var si = flat[pos][0], last = !flat[pos + 1] || flat[pos + 1][0] !== si, tail = last ? actsAt(si, scenes[si].chunks.length) : [];
+    if (tail.length) return runActs(my, si, tail, function(){ settle(my); });
+    settle(my);
+  }
+  function settle(my){
     var next = flat[pos + 1], leaving = next && next[0] !== flat[pos][0], h = scenes[flat[pos][0]].hold;
     var gap = 450 + (leaving ? 700 + 1000 * (h != null ? h : (window.__h2mHold || 0)) : 0);     // a slide's own Hold: wins over the Studio's pacing
     timers.push(setTimeout(function(){ if (token !== my || !playing) return; if (pos >= flat.length - 1) { pause(); return; } pos++; playStep(); }, gap / rate));
@@ -417,7 +494,14 @@ PLAYER_JS = r"""/*h2m:player-js*/
     if (playing) playStep();
   }
   function playStep(){
-    token++; var my = token; clearTimers(); stopAudio(); showStep(true);
+    token++; var my = token; clearTimers(); stopAudio();
+    var si = flat[pos][0], ci = flat[pos][1], list = actsAt(si, ci);
+    if (!list.length) return begin(my);
+    if (ci === 0) openSlide(si);
+    runActs(my, si, list, function(){ begin(my); });
+  }
+  function begin(my){
+    showStep(true);
     var text = flat[pos][2];
     if (mode === 'studio' && studio) return playStudio(my);
     if (window.speechSynthesis && voice) { armEstimate(text, my, 1.7); return speakBrowser(my); }
@@ -612,6 +696,14 @@ def read_project(page):
     return data
 
 
+def _voice_of(name, spec):
+    """The voice a character speaks with: the one the script gave it, else the one set in the media library, else the default character voice."""
+    if spec: return spec
+    from html2mp4 import media, script
+    try: return script.voice_id(media.actor_voice(name) or script.DEFAULT_CHARACTER_VOICE)
+    except script.ScriptError: return script.voice_id(script.DEFAULT_CHARACTER_VOICE)
+
+
 def scenes_js(module):
     """The narration as the page's script: `var voices` (the speakers other than the narrator and their voices, when there are any) and
     `var scenes`, one entry per slide with its sentences verbatim, its own hold, and who says which sentence (`who`, by index)."""
@@ -619,7 +711,7 @@ def scenes_js(module):
     chunks = ([module.intro] if module.intro else []) + [s.say for s in module.slides]
     holds = ([None] if module.intro else []) + [s.hold for s in module.slides]
     whos = ([module.intro_speakers] if module.intro else []) + [s.speakers for s in module.slides]
-    voices = {k: v for k, v in (module.voices or {}).items() if any(k in w for w in whos)}
+    voices = {k: _voice_of(k, v) for k, v in (module.voices or {}).items() if any(k in w for w in whos)}
     def one(sid, c, h, w):
         who = {str(i): x for i, x in enumerate(w) if x}
         return (f"  {{id:'{sid}', {f'hold:{h:g}, ' if h is not None else ''}{f'who:{json.dumps(who, ensure_ascii=False)}, ' if who else ''}"
@@ -638,12 +730,17 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
     if module.intro:
         sections.append(f'<section class="slide title-slide" id="s0">{title_slide(module, brand)}{_footer(brand, -1, 0)}</section>')
     from html2mp4 import media
+    cast = media.cast_for(module)                             # what the characters in this module do, resolved against the media library
+    defs = {}                                                 # an animated picture used on several slides is in the page once
     for i, (layout, inner) in enumerate(slides):
-        inner = media.resolve(inner)[0]                       # library images go into the page itself, so it travels with them
+        inner = media.resolve(inner, clips=cast["by_slide"].get(f"s{i + 1}", {}), defs=defs)[0]       # library images go into the page itself, so it travels with them
         sections.append(f'<section class="slide {esc(layout)}" id="s{i + 1}"><div class="slide-body">{inner}</div>'
                         f'{_footer(brand, i, total)}</section>')
     scene_js = scenes_js(module)
+    pictures_css = "\n".join(f".h2m-pic-{k}{{background-image:url({v})}}" for k, v in defs.items())
     source = json.dumps(module.to_dict(), ensure_ascii=False).replace("</", "<\\/")
+    cast_html = ('<script type="application/json" id="h2m-cast">' + json.dumps({"actors": cast["actors"], "acts": cast["acts"]}, ensure_ascii=False).replace("</", "<\\/") + "</script>"
+                 if cast["acts"] else "")
     faces, covered = font_faces(brand)
     page = f"""<!DOCTYPE html>
 <html lang="en" data-motion="{'calm' if motion == 'calm' else 'lively'}">
@@ -658,6 +755,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
 {theme_css(brand)}
 {css}
 {media.speaker_css(module.voices)}
+{pictures_css}
 </style>
 </head>
 <body>
@@ -666,6 +764,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
 </div></div>
 {PLAYER_BAR_HTML}
 <script type="application/json" id="html2mp4-source">{source}</script>
+{cast_html}
 <script type="application/json" id="html2mp4-project"></script>
 <script>
 {scene_js}
@@ -776,3 +875,6 @@ def main():
     if problems: sys.exit("[html2mp4] error: " + "; ".join(problems))
     out.write_text(page, encoding="utf-8")
     print(f"[html2mp4] {out}  ({len(module.slides)} slides, {module.sentences} sentences)")
+
+
+PLAYER_JS = PLAYER_JS.replace("/*h2m:motion-here*/", MOTION_JS.strip())      # the player carries the same motion shapes the video renderer uses

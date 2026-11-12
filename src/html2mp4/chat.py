@@ -76,13 +76,18 @@ Say: Done well, it builds trust, speeds up growth, and prevents surprises at rev
   its last graphic isn't on screen long enough, add `Hold: 3` (2 to 4 seconds; more for a dense slide) to that slide and change
   nothing else about it. `Hold:` is timing only: it never needs a redesign, so never put it in `visual_requests`. `Hold: 0` means
   no extra time. If they'd rather the graphic simply appear earlier in the sentence, that is a visual request instead.
-- A second speaker (a mascot or character who talks alongside the narrator): declare it once with `Voice: NAME = VOICE` (voices
-  for characters: Puck, playful and young, male; Sky, light and lively, female; Echo, friendly and even, male; Nicole, soft, female),
-  then give it lines with `NAME: sentence` wherever a `Say:` could go (in the scene format, `NAME: "…"` on its own line). The narrator
-  keeps every line not marked. Keep a character's lines short, warm and in its own voice (a mascot greets, reacts, sums up, asks the
-  viewer something), and alternate with the narrator rather than giving it long passages. Put the character's talking image on the
-  slides where it speaks (`Image:`): an image that "talks while NAME speaks" moves its mouth only on NAME's lines.
-
+- A character (a mascot such as Spotter) can talk and act alongside the narrator. The media library lists the characters ("a talking character
+  that speaks as NAME") with what each can do. Use one only when asked, or where it clearly helps (a greeting, a reaction, a sign-off). It needs
+  no declaration beyond using it, and no `Image:` line: it is placed on every slide where it speaks or acts. Lines, each on its own line
+  where a `Say:` could go (in the scene format, in quotes on its own line):
+    `NAME say: sentence`        the character says it aloud, in its own voice. Nothing is printed on the slide. This is the default way.
+    `NAME bubble: sentence`     the character says it aloud AND it is printed in a speech bubble. Only when the person wants it on screen.
+    `NAME animate: what to do`  the character does something between two sentences: wave, wink, laugh, jump, nod, shake his head, wag his tail,
+                                think, bounce... Say it plainly ("wiggle his tail"); only actions the library lists for that character work.
+  `Voice: NAME = Puppy` is optional and only chooses the voice (Puppy, Pup High, Buddy, Sunny, or "Puppy, pitch +2, pace 1.1"); the library
+  already gives each character its own. Keep a character's lines short, warm and in character (it greets, reacts, sums up, asks the viewer
+  something), alternate with the narrator, and use at most one or two actions on a slide; never an action it can't do. When the person says
+  "print what Spotter says" or "show his words", use `bubble`; when they say "just narrate" or "don't show the text", use `say`.
 # Writing narration
 - Write for the ear: short sentences (under 25 words), plain words, second person ("you"), one idea per sentence.
 - No bullet points, URLs, emoji or symbols. Spell out abbreviations and say numbers the way they are spoken ("R and D").
@@ -244,7 +249,7 @@ def diff(old_text, new_text):
     rows = []
     if old is None or old.intro != new.intro or old.title != new.title or old.subtitle != new.subtitle:
         rows.append({"slide": "s0", "title": new.title, "kind": "added" if old is None else "changed"})
-    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers))
+    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers), tuple((a['at'], a['who'], a['do']) for a in s.acts), tuple(s.shown))
     olds, news = [] if old is None else [key(s) for s in old.slides], [key(s) for s in new.slides]
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, olds, news, autojunk=False).get_opcodes():
         if op == "equal":

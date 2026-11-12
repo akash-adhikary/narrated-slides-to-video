@@ -12,7 +12,8 @@ async function loadMedia(){
 }
 function renderMedia(){
   const g = $("#mdGrid"); if(!g) return;
-  g.innerHTML = M.items.length ? M.items.slice().reverse().map(it => `<button type="button" class="md-card" data-id="${esc(it.id)}">
+  const shown = M.items.filter(it => !it.action_of);           // a clip cut out as a character's action lives with that character
+  g.innerHTML = shown.length ? shown.slice().reverse().map(it => `<button type="button" class="md-card" data-id="${esc(it.id)}">
       <span class="md-th${it.transparent ? " chk" : ""}"><img src="${it.preview}" alt="" loading="lazy">${badge(it) ? `<i>${badge(it)}</i>` : ""}</span>
       <b>${esc(it.name)}</b><small>${KIND_LABEL[it.kind] || it.kind} · ${it.w}×${it.h} · ${kb(it.bytes)}</small></button>`).join("")
     : `<p class="md-empty">No images yet. Upload a mascot, a logo or an office photo to use them in your videos.</p>`;
@@ -46,6 +47,7 @@ function openMedia(id){
   $("#mdStage").classList.toggle("chk", !!it.transparent);
   $("#mdName").value = it.name; $("#mdDesc").value = it.description || ""; $("#mdSpeaker").value = it.speaker || "";
   $("#mdSpeakerL").hidden = !(it.animated && ["talk", "character"].includes(it.animated.mode));
+  renderActor(it);
   $("#mdKind").innerHTML = M.kinds.map(k => `<option value="${k}" ${k === it.kind ? "selected" : ""}>${KIND_LABEL[k] || k}</option>`).join("");
   $("#mdMeta").textContent = [`${it.w}×${it.h}`, kb(it.bytes), it.format.toUpperCase(), it.transparent ? "transparent background" : "",
     it.video ? `${it.seconds} s clip` + (it.speech && it.speech.length ? `, speaks ${it.speech.map(([a, b]) => `${a}–${b} s`).join(", ")}` : ", no speech") : "",
@@ -61,10 +63,54 @@ function openMedia(id){
   $("#mdDlg [data-op=animate]").title = it.transparent ? "Claude finds the tail, ears and tongue; they move, the character breathes, and its mouth talks while the narrator speaks" : "Remove the background first: this works on a cut-out";
   $("#mdStatus").textContent = ""; $("#mdDlg").open || $("#mdDlg").showModal();
 }
+// a character: the voice it speaks with, and what it can do (clips of it, plus built-in motions)
+const CV = {voices: null};
+async function loadVoices(){ if(!CV.voices){ try{ CV.voices = await api("/api/voices/characters"); }catch(e){ CV.voices = {voices: []}; } } return CV.voices; }
+async function renderActor(it){
+  const isChar = it.animated && it.animated.mode === "character", isClip = !!it.video;
+  $("#mdVoiceL").hidden = !isChar; $("#mdActions").hidden = !isChar; $("#mdClipTools").hidden = !isClip;
+  if(isChar){
+    const v = await loadVoices(); if(M.open !== it && M.open && M.open.id !== it.id) return;
+    $("#mdVoice").innerHTML = `<option value="">Default (${esc((v.voices[0] || {}).name || "Puppy")})</option>` + v.voices.map(x => `<option value="${esc(x.id)}" ${String(it.voice || "").toLowerCase() === x.name.toLowerCase() || it.voice === x.id ? "selected" : ""}>${esc(x.name)}: ${esc(x.description)}</option>`).join("");
+    const clips = (it.actor && it.actor.clips) || {};
+    $("#mdActionList").innerHTML = Object.entries(clips).map(([k, c]) => `<span class="md-chip clip" title="A clip of ${esc(it.speaker || it.name)}, ${c.seconds} s"><b>${esc(k)}</b><i>${c.seconds}s</i><button type="button" data-rm="${esc(k)}" aria-label="Remove ${esc(k)}">×</button></span>`).join("")
+      + ((it.actor && it.actor.motions) || []).filter(m => !clips[m]).map(m => `<span class="md-chip" title="A built-in motion of the picture"><b>${esc(m)}</b></span>`).join("");
+    const vids = M.items.filter(x => x.video && !x.action_of);
+    $("#mdActClip").innerHTML = `<option value="">Choose a clip…</option>` + vids.map(x => `<option value="${esc(x.id)}">${esc(x.name)} (${x.seconds}s)</option>`).join("");
+    $("#mdActName").value = "";
+  }
+  if(isClip){
+    const chars = M.items.filter(x => x.animated && x.animated.mode === "character");
+    $("#mdClipActor").innerHTML = chars.length ? chars.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("") : `<option value="">No talking character yet</option>`;
+    $("#mdClipAs").value = ""; $("#mdPartFrom").value = ""; $("#mdPartTo").value = "";
+  }
+}
+$("#mdVoiceTry").addEventListener("click", () => {
+  const id = $("#mdVoice").value || (CV.voices && CV.voices.voices[0] ? CV.voices.voices[0].id : "puppy");
+  const a = new Audio(`/api/voice-sample/${encodeURIComponent(id)}`); $("#mdStatus").textContent = "Playing a sample…"; a.onended = () => $("#mdStatus").textContent = ""; a.play().catch(e => $("#mdStatus").textContent = "The sample couldn't be played: " + e.message);
+});
+$("#mdActionList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-rm]"); if(!b) return;
+  try{ await api(`/api/media/${M.open.id}/actions/${encodeURIComponent(b.dataset.rm)}`, {method: "DELETE"}); await loadMedia(); openMedia(M.open.id); toast(`Removed “${b.dataset.rm}”`); }catch(err){ toast(err.message); }
+});
+$("#mdActAdd").addEventListener("click", async () => {
+  try{ await post(`/api/media/${M.open.id}/actions`, {name: $("#mdActName").value, clip: $("#mdActClip").value}); const id = M.open.id; await loadMedia(); openMedia(id); toast("Added"); }
+  catch(err){ $("#mdStatus").textContent = err.message; }
+});
+$("#mdClipLink").addEventListener("click", async () => {
+  const actor = $("#mdClipActor").value, btn = $("#mdClipLink"); if(!actor){ $("#mdStatus").textContent = "Make a talking character first (open a clip of a character speaking and choose Make a talking character)."; return; }
+  const from = parseFloat($("#mdPartFrom").value), to = parseFloat($("#mdPartTo").value);          // optional: only this part of the clip
+  btn.disabled = true; $("#mdStatus").textContent = "Cutting the clip out to match the character… (a few seconds)";
+  try{ await post(`/api/media/${actor}/actions`, {name: $("#mdClipAs").value, clip: M.open.id, start: isNaN(from) ? null : from, end: isNaN(to) ? null : to}); await loadMedia(); toast(`Added as “${$("#mdClipAs").value}”`); $("#mdStatus").textContent = ""; }
+  catch(err){ $("#mdStatus").textContent = err.message; }
+  finally{ btn.disabled = false; }
+});
+$("#mdPartGo").addEventListener("click", () => runEdit("clip", {start: parseFloat($("#mdPartFrom").value), end: parseFloat($("#mdPartTo").value)}));
 $("#mdClose").addEventListener("click", () => $("#mdDlg").close());
 $("#mdDlg").addEventListener("close", () => $("#mdVid").pause());
 $("#mdSave").addEventListener("click", async () => {
-  try{ await post(`/api/media/${M.open.id}`, {name: $("#mdName").value, kind: $("#mdKind").value, description: $("#mdDesc").value, speaker: $("#mdSpeaker").value}, "PATCH"); await loadMedia(); openMedia(M.open.id); toast("Saved"); }
+  try{ await post(`/api/media/${M.open.id}`, {name: $("#mdName").value, kind: $("#mdKind").value, description: $("#mdDesc").value, speaker: $("#mdSpeaker").value,
+        ...(M.open.animated && M.open.animated.mode === "character" ? {voice: $("#mdVoice").value} : {})}, "PATCH"); await loadMedia(); openMedia(M.open.id); toast("Saved"); }
   catch(err){ toast(err.message); }
 });
 $("#mdDescribe").addEventListener("click", async () => {
@@ -113,7 +159,7 @@ $("#mdCropApply").addEventListener("click", () => { const b = M.crop && M.crop.b
 /* ---------- Insert image (above the script): adds "Image: NAME" to the slide the cursor is in ---------- */
 function renderPicker(){
   const m = $("#wImgMenu"); if(!m) return;
-  m.innerHTML = `<div class="menu-h">Media library</div>` + (M.items.length ? M.items.slice().reverse().map(it => `<button type="button" class="ip-row" data-name="${esc(it.name)}">
+  m.innerHTML = `<div class="menu-h">Media library</div>` + (M.items.filter(i => !i.action_of).length ? M.items.filter(i => !i.action_of).slice().reverse().map(it => `<button type="button" class="ip-row" data-name="${esc(it.name)}">
       <span class="ip-th${it.transparent ? " chk" : ""}"><img src="${it.preview}" alt="" loading="lazy"></span><span><b>${esc(it.name)}</b><small>${KIND_LABEL[it.kind] || it.kind}${badge(it) ? " · " + badge(it) : ""}</small></span></button>`).join("")
     : `<p class="ip-empty">No images yet. Add some in <a href="#settings">Settings > Media library</a>, or attach one in the assistant.</p>`);
 }

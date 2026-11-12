@@ -50,7 +50,7 @@ class Cancelled(Exception):
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 8                      # bump to invalidate cached video renders
+RENDER_VERSION = 9                      # bump to invalidate cached video renders
 
 FPS = 30
 # Output size; the stage is rendered natively at that scale (vector-sharp, never upscaled). 1440p keeps colour detail at
@@ -69,10 +69,12 @@ SETTLE_HOLD  = 0.6                      # fully built slide stays up this long b
 END_HOLD     = 1.6                      # hold on the last frame
 FADE_OUT     = 0.8                      # sound fades at the very end (the picture holds the last slide, as the page does)
 
+from html2mp4 import compose as _compose
 PAGE_CSS = "#bar,#start,#capbox,#notice{display:none!important}#frame{inset:0!important}#stage{transform:none!important}"
 
 PAGE_JS = """
 (ids) => {
+/*h2m:motion-here*/
   const scenes = ids.map(id => document.getElementById(id));
   const items = scenes.map(s => [...s.querySelectorAll('[data-c]')]);
   items.flat().forEach(e => { const d = e.getAttribute('data-d'); if (d) e.style.setProperty('--d', d + 's'); });
@@ -125,26 +127,50 @@ PAGE_JS = """
       document.getAnimations().forEach(a => { try { if (a.effect.getComputedTiming().iterations !== Infinity) a.finish(); } catch (e) {} });
       started.clear();
     },
-    show: (si, ci, t) => {                // same rule as the page's own render()
+    show: (si, ci, t) => {                // same rule as the page's own render(); ci -1 opens a slide that starts with an action: its characters only
       if (!scenes[si].classList.contains('active')) slideStart = t;      // a slide's video clips play from when it appears
       seek(t);
       scenes.forEach((s, i) => s.classList.toggle('active', i === si));
       items.forEach((list, i) => list.forEach(e => e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci))));
+      if (ci < 0) scenes[si].querySelectorAll('[data-speaker]').forEach(e => { for (let n = e; n && n !== stage; n = n.parentElement) if (n.hasAttribute('data-c')) n.classList.add('on'); });
       seek(t);
     },
+    actors: () => scenes.map(s => [...new Set([...s.querySelectorAll('[data-speaker]')].map(e => e.getAttribute('data-speaker')))]),   // who is on each slide
     // a talking character moves only while the voice does: `speaking` is null (silence), "" (the narrator) or a speaker's name.
     // Video clips on the active slide show the exact moment since the slide appeared (each frame waits for the clip to get there).
-    frame: (t, speaking) => {
-      talking(speaking); seek(t);
+    // `act` is what a character is doing right now, [name, action, kind, seconds into it, seconds it lasts], or null
+    frame: (t, speaking, act) => {
+      talking(speaking);
       const active = scenes.find(s => s.classList.contains('active'));
+      const waits = [];
+      document.querySelectorAll('.h2m-actor.acting').forEach(e => e.classList.remove('acting'));
+      document.querySelectorAll('video.h2m-act.on').forEach(v => v.classList.remove('on'));
+      document.querySelectorAll('.h2m-sprite').forEach(e => { if (e.style.transform) { e.style.transform = ''; e.style.transition = ''; } });
+      if (act && active) {
+        const el = active.querySelector('[data-speaker="' + act[0] + '"]');
+        if (el) {
+          const sprite = el.classList.contains('h2m-sprite') ? el : (el.querySelector('.h2m-sprite') || el);
+          const v = act[2] === 'clip' ? el.querySelector('video[data-act="' + act[1] + '"]') : null;
+          if (v) {
+            el.classList.add('acting'); v.classList.add('on');
+            const want = Math.max(0, Math.min((v.duration || act[4]) - 0.001, act[3]));
+            waits.push(new Promise(done => {
+              if (v.readyState >= 2 && Math.abs(v.currentTime - want) < 0.001) return done();
+              const ok = () => { v.removeEventListener('seeked', ok); requestAnimationFrame(() => done()); };
+              v.addEventListener('seeked', ok); setTimeout(ok, 3000); v.pause(); v.currentTime = want;
+            }));
+          } else { sprite.style.transition = 'none'; sprite.style.transform = h2mMotion(act[1], act[3] / act[4]); }
+        }
+      }
+      seek(t);
       const clips = active ? [...active.querySelectorAll('video[data-h2m-video]')] : [];
-      if (!clips.length) return null;
-      return Promise.all(clips.map(v => new Promise(done => {
+      clips.forEach(v => waits.push(new Promise(done => {
         const want = Math.max(0, Math.min((v.duration || 0) - 0.001, t - slideStart));
         if (v.readyState >= 2 && Math.abs(v.currentTime - want) < 0.001) return done();
         const ok = () => { v.removeEventListener('seeked', ok); requestAnimationFrame(() => done()); };
         v.addEventListener('seeked', ok); setTimeout(ok, 3000); v.pause(); v.currentTime = want;
       })));
+      return waits.length ? Promise.all(waits) : null;
     },
   };
 }
@@ -173,6 +199,13 @@ def load_scenes(html_text):
             who = {int(k): v for k, v in json.loads(s.group(3)).items()}
             sc["who"] = who; sc["voices"] = {i: voices[w] for i, w in who.items() if w in voices}
         scenes.append(sc)
+    cm = re.search(r'<script type="application/json" id="h2m-cast">(.*?)</script>', html_text, re.S)
+    cast = json.loads(cm.group(1)) if cm else {}                          # what characters do between sentences: {slide id: {sentence index: [[name, action]]}}
+    for sc in scenes:
+        row = (cast.get("acts") or {}).get(sc["id"]) or {}
+        if row:
+            known = lambda n, k: ((cast.get("actors") or {}).get(n) or {}).get("actions", {}).get(k, {})
+            sc["acts"] = {int(at): [(n, k, known(n, k).get("kind", "motion"), float(known(n, k).get("seconds", 1.0))) for n, k in lst] for at, lst in row.items()}
     if not scenes or not any(s["chunks"] for s in scenes):
         raise ConversionError("The narration script in this file is empty.")
     missing = [s["id"] for s in scenes if f'id="{s["id"]}"' not in html_text and f"id='{s['id']}'" not in html_text]
@@ -231,7 +264,7 @@ def _norm_word(w): return re.sub(r"[^a-z0-9]+", "", w.lower())
 
 def clip_path(text, voice, speed, cache, pronounce=None):
     """Where the voiced clip of one sentence is kept (the same sentence, voice and pronunciations always map to the same file)."""
-    return cache / f"{voice}_{speed}_{hashlib.sha1(spoken(text, pronounce).encode()).hexdigest()[:12]}.wav"
+    return cache / f"{voice.replace('|', '@')}_{speed}_{hashlib.sha1(spoken(text, pronounce).encode()).hexdigest()[:12]}.wav"
 
 
 def pending(scenes, voice, speed, cache, pronounce=None, timings=False):
@@ -286,17 +319,21 @@ def word_times(scenes, voice, speed, cache, pronounce=None):
 
 
 def _synthesize_todo(todo, voice, speed, key, progress, say=lambda t: t, need=lambda c: True):
-    pipe = kokoro_pipeline(voice[0])
+    base, semitones, pace = split_voice(voice)                           # a character's voice may be lifted and quicker than the narrator's
+    pipe = kokoro_pipeline(base[0])
     for i, text in enumerate(todo):
         progress(i / len(todo))
         if not need(text): continue                                    # made meanwhile by another caller
         pieces, words, offset = [], [], 0.0
-        for r in pipe(say(text), voice=voice, speed=speed):
+        for r in pipe(say(text), voice=base, speed=speed * pace):
             pieces.append(r.audio.numpy() if hasattr(r.audio, "numpy") else r.audio)
             for t in (getattr(r, "tokens", None) or []):
                 if t.start_ts is not None and _norm_word(t.text): words.append((_norm_word(t.text), offset + t.start_ts))
             offset += len(pieces[-1]) / TTS_SR
         a = np.concatenate(pieces)
+        if semitones:
+            n0 = len(a); a = pitch_shift(a, semitones, TTS_SR); k = len(a) / max(1, n0)
+            words = [(w, t * k) for w, t in words]                      # the shifted clip keeps its length, to within a few milliseconds
         idx = np.where(np.abs(a) > 0.004)[0]                           # trim silence, keep 30 ms
         pad = int(0.03 * TTS_SR)
         start = max(0, idx[0] - pad)
@@ -319,32 +356,56 @@ def open_page(p, html, width=1920):
     return browser, page
 
 
-def measure_spans(html, ids, times=None):
+def measure_page(html, ids, times=None):
+    """(how long each slide's graphics take to build, who is on each slide), measured in the page itself."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser, page = open_page(p, html)
         page.evaluate(PAGE_JS, ids)
         if times: page.evaluate("t => __html2mp4.setWordTimes(t)", times)
         spans = page.evaluate("__html2mp4.spans()")
+        actors = page.evaluate("__html2mp4.actors()")
         browser.close()
-    return spans
+    return spans, actors
+
+
+def measure_spans(html, ids, times=None): return measure_page(html, ids, times)[0]
 
 
 # ---------------------------------------------------------------- timeline
 
-def build_timeline(scenes, audio, spans, hold=0.0):
-    """`hold`: extra seconds each finished slide stays up (a slide's own `hold` wins), so the last graphic can be taken in."""
+ACT_GAP = 0.12                          # a breath after a character's action
+
+
+def _acts_before(sc, ci, present, si):
+    """The actions due before sentence `ci` of scene `sc` (ci == number of sentences: after the last one). A character that isn't on that
+    slide does nothing there."""
+    row = (sc.get("acts") or {}).get(ci) or []
+    return [a for a in row if present is None or a[0] in (present.get(si) or ())]
+
+
+def build_timeline(scenes, audio, spans, hold=0.0, present=None, acts_out=None):
+    """`hold`: extra seconds each finished slide stays up (a slide's own `hold` wins), so the last graphic can be taken in.
+    A character's action is a beat of its own between two sentences. `present` ({scene index: {names on that slide}}) lets actions of a
+    character that isn't on its slide be skipped; `acts_out`, when given, receives (start, end, name, action, kind) for each action played."""
     t, events, clips = PRE_ROLL, [], []
     for si, sc in enumerate(scenes):
         if si: t += SCENE_GAP
-        visual_end = 0
+        visual_end, opened = 0, False
         for ci, text in enumerate(sc["chunks"]):
+            for name, act, kind, secs in _acts_before(sc, ci, present, si):
+                if ci == 0 and not opened: events.append((max(0.0, t - VISUAL_LEAD), si, -1)); opened = True       # the slide appears with its characters
+                if acts_out is not None: acts_out.append((t, t + secs, name, act, kind))
+                t += secs + ACT_GAP
             a = audio[si][ci]
             ev = max(0.0, t - VISUAL_LEAD)
             events.append((ev, si, ci))
             clips.append((t, a, text, (sc.get("who") or {}).get(ci, "")))     # who says it ("" = the narrator)
             visual_end = max(visual_end, ev + spans[si].get(str(ci), 0) + SETTLE_HOLD)
             t += len(a) / TTS_SR + CHUNK_GAP
+        for name, act, kind, secs in _acts_before(sc, len(sc["chunks"]), present, si):
+            if acts_out is not None: acts_out.append((t, t + secs, name, act, kind))
+            t += secs + ACT_GAP
         t = max(t, visual_end) + float(sc.get("hold", hold))
     return events, clips, t - CHUNK_GAP + END_HOLD + FADE_OUT
 
@@ -358,8 +419,11 @@ def x264(crf, fast=False, threads=0):
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-threads", str(threads)]
 
 
+PAGE_JS = PAGE_JS.replace("/*h2m:motion-here*/", _compose.MOTION_JS.strip())
+
+
 def render_segment(job):
-    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause, times, speech = job
+    html, ids, events, f0, f1, total, out, q, (width, height), crf, fast, stop, threads, nice, pause, times, speech, acts = job
     if nice: os.nice(nice)              # background renders yield the CPU to interactive work (previews)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -384,7 +448,8 @@ def render_segment(job):
                 et, si, ci = events[ei]
                 page.evaluate(f"__html2mp4.show({si},{ci},{et})"); ei += 1
             who = next((w for a, b, w in speech if a <= t < b), None)
-            page.evaluate(f"__html2mp4.frame({t}, {json.dumps(who)})")
+            act = next(([n, k, kind, round(t - st, 4), round(en - st, 4)] for st, en, n, k, kind in acts if st <= t < en), None)
+            page.evaluate(f"__html2mp4.frame({t}, {json.dumps(who)}, {json.dumps(act)})")
             # CDP ignores the emulated device scale unless the clip carries it explicitly
             shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True, "clip": clip})
             import base64; png = base64.b64decode(shot["data"])
@@ -398,11 +463,12 @@ def render_segment(job):
 
 
 def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False,
-                 cancel=None, nice=0, pausable=False, times=None, speech=()):
+                 cancel=None, nice=0, pausable=False, times=None, speech=(), acts=()):
     """`speech`: [(start, end, who)] seconds when someone is speaking ("" = the narrator, or the speaker's name): a talking
     character moves only then (a character that is a named speaker only while that speaker talks)."""
     nframes = int(round(total * FPS)); speech = [(round(x[0], 3), round(x[1], 3), x[2] if len(x) > 2 else "") for x in speech]
-    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times, speech]).encode()).hexdigest()
+    acts = [(round(a, 3), round(b, 3), n, k, kind) for a, b, n, k, kind in acts]
+    key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times, speech, acts]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
     if video.exists() and keyfile.exists() and keyfile.read_text() == key:
         log("video unchanged — reusing cached render"); return video
@@ -417,7 +483,7 @@ def render_video(html, ids, events, total, work, workers, progress=lambda f: Non
         q, stop, pause = mgr.Queue(), mgr.Event(), mgr.Event()
         futures = [ex.submit(render_segment, (str(html), ids, events, int(bounds[i]), int(bounds[i + 1]), total,
                                               str(segdir / f"{i:03}.mp4"), q, size, crf, fast, stop, threads, nice,
-                                              pause if pausable else None, times, speech))
+                                              pause if pausable else None, times, speech, acts))
                    for i in range(workers)]
         done = 0
         while not all(f.done() for f in futures):
@@ -552,12 +618,48 @@ VOICES = {   # curated Kokoro voices: id -> (name, description)
     "bf_emma":    ("Emma",    "Clear and polished · UK female"),
     "bm_george":  ("George",  "Measured and classic · UK male"),
 }
-CHARACTER_VOICES = {   # extra voices for a second speaker (a mascot or character), named in a script's "Voice:" line
-    "am_puck":    ("Puck",    "Playful and young · US male"),
-    "af_nicole":  ("Nicole",  "Soft and close · US female"),
-    "am_echo":    ("Echo",    "Friendly and even · US male"),
-    "af_sky":     ("Sky",     "Light and lively · US female"),
+CHARACTER_VOICES = {   # preset id -> (name, description, base voice, semitones up, pace): voices made for a character
+    "puppy":    ("Puppy",    "Bright, quick and playful · a young boyish voice", "am_puck", 6, 1.10),
+    "pup-high": ("Pup High", "Higher and zippier than Puppy", "am_puck", 8, 1.12),
+    "buddy":    ("Buddy",    "Friendly and bright · a lighter, warmer lift", "am_michael", 6, 1.08),
+    "sunny":    ("Sunny",    "Bright and upbeat · US female", "af_bella", 0, 1.12),
 }
+KOKORO_NAMES = {n: f"{p}_{n}" for p, names in {"af": "alloy aoede bella heart jessica kore nicole nova river sarah sky", "am": "adam echo eric fenrir liam michael onyx puck santa",
+                                               "bf": "alice emma isabella lily", "bm": "daniel fable george lewis"}.items() for n in names.split()}
+
+
+def join_voice(base, pitch=0.0, pace=1.0):
+    """A voice spec: the base Kokoro voice alone, or 'base|semitones|pace' when the voice is lifted or sped up."""
+    return base if abs(pitch) < 1e-9 and abs(pace - 1) < 1e-9 else f"{base}|{pitch:g}|{pace:g}"
+
+
+def split_voice(spec):
+    """(base voice, semitones, pace) of a voice spec."""
+    base, *rest = str(spec).split("|")
+    return base, float(rest[0]) if rest else 0.0, float(rest[1]) if len(rest) > 1 else 1.0
+
+
+def voice_spec(text):
+    """What a person calls a voice ('Puppy', 'Puck', 'am_puck', 'bella') -> its voice spec, or None if there is no such voice."""
+    t = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not t: return None
+    for pid, (name, _d, base, st, pace) in CHARACTER_VOICES.items():
+        if t in (pid, name.lower(), name.lower().replace(" ", "-")): return join_voice(base, st, pace)
+    for vid, (name, _d) in VOICES.items():
+        if t in (vid, name.lower()): return vid
+    if t in KOKORO_NAMES: return KOKORO_NAMES[t]
+    return t if re.fullmatch(r"[ab][mf]_[a-z]+", t) else None
+
+
+def pitch_shift(audio, semitones, sr=24000):
+    """A voice lifted (or lowered) by `semitones` without changing its length. Formants move with the pitch, so a lifted voice sounds
+    smaller and younger: right for a character, and a few semitones stay natural."""
+    if not semitones: return audio
+    r = 2 ** (max(-12.0, min(12.0, float(semitones))) / 12)
+    flt = f"asetrate={sr}*{r:.6f},aresample={sr},atempo={1 / r:.6f}"
+    out = subprocess.run([FFMPEG, "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-", "-af", flt, "-f", "f32le", "-ar", str(sr), "-ac", "1", "-"],
+                         input=np.asarray(audio, "<f4").tobytes(), capture_output=True, check=True).stdout
+    return np.frombuffer(out, "<f4").copy()
 
 # share of the overall progress bar each step takes (rendering frames dominates)
 STEPS = [("voice", "Recording the voiceover", 0.14), ("layout", "Timing the animations", 0.03),
@@ -612,12 +714,15 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     tts_cache = CACHE / "tts"
     times = None
 
+    acts_tl = []
+
     def timeline_for(subset):
         nonlocal times
         audio = synthesize(subset, voice, speed, tts_cache, voice_progress, pron, timings=cued)
         times = word_times(subset, voice, speed, tts_cache, pron) if cued else None
-        spans = measure_spans(html, [s["id"] for s in subset], times)
-        return build_timeline(subset, audio, spans, hold)
+        spans, actors = measure_page(html, [s["id"] for s in subset], times)
+        acts_tl.clear()
+        return build_timeline(subset, audio, spans, hold, present={i: set(a) for i, a in enumerate(actors)}, acts_out=acts_tl)
 
     if preview_seconds:      # narrate only as many scenes as the preview needs
         for n in range(1, len(scenes) + 1):
@@ -631,7 +736,7 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     step("layout")
     video = render_video(html, ids, events, total, work, workers, step("frames"), cancel=cancel, nice=nice, pausable=pausable,
                          size=QUALITIES[quality], fast=bool(preview_seconds), times=times,
-                         speech=[(t, t + len(a) / TTS_SR, who) for t, a, _, who in clips])
+                         speech=[(t, t + len(a) / TTS_SR, who) for t, a, _, who in clips], acts=[x for x in acts_tl if x[0] < total])
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
     step("finish")
