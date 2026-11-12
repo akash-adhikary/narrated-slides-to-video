@@ -57,7 +57,10 @@ Open the character in **Settings > Media library** and choose **Export this char
 about 8 MB) holding the character, his action clips, the cut-out they were made from (so new actions can still be matched to him) and his
 voice setting. On another computer, **Settings > Media library > Import a character** brings it all in. Importing never overwrites: if the
 name is taken the copy is called "Spotter (2)", and you are told when two characters speak as the same name. The original green-screen films
-are not included, and the file is a mascot, so share it only with people who should have it.
+are not included.
+
+**Spotter is included.** The Spotter mascot is in the repository as a ready-made file, `examples/characters/Spotter.h2m-character.zip`
+(see the README next to it): import it and use him straight away.
 
 ## Good to know
 

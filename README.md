@@ -124,7 +124,7 @@ Disk space: about 3 GB for Python, the voice model and Chromium. A 2–3 minute 
 
 - [Getting started](docs/getting-started.md): installation and first video, for non-technical users
 - [From script to slides](docs/scripts.md): script formats, brand kit, the checker, and asking for changes
-- [Characters](docs/characters.md): a mascot that talks and acts ("Spotter animate: wave"), and how to make one
+- [Characters](docs/characters.md): a mascot that talks and acts ("Spotter animate: wave"), and how to make one; the ThoughtSpot mascot comes ready-made in [examples/characters](examples/characters/README.md)
 - [Authoring modules](docs/authoring.md): the module format, for writing or editing HTML by hand
 - [CLI reference](docs/cli.md): commands, options and environment variables
 - [How it works](docs/how-it-works.md): pipeline, audio, encoding, Studio, and fidelity to the source
