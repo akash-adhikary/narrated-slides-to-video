@@ -23,7 +23,7 @@ SCHEMA = {"type": "object", "properties": {
     "suggestions": {"type": "array", "items": {"type": "string"}},
     "image_ops": {"type": "array", "items": {"type": "object", "properties": {
         "asset": {"type": "string"},
-        "op": {"type": "string", "enum": ["crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate"]},
+        "op": {"type": "string", "enum": ["crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate", "character"]},
         "box": {"type": ["array", "null"], "items": {"type": "number"}},
         "size": {"type": ["number", "null"]}, "degrees": {"type": ["number", "null"]},
         "direction": {"type": ["string", "null"]}, "format": {"type": ["string", "null"]},
@@ -76,6 +76,12 @@ Say: Done well, it builds trust, speeds up growth, and prevents surprises at rev
   its last graphic isn't on screen long enough, add `Hold: 3` (2 to 4 seconds; more for a dense slide) to that slide and change
   nothing else about it. `Hold:` is timing only: it never needs a redesign, so never put it in `visual_requests`. `Hold: 0` means
   no extra time. If they'd rather the graphic simply appear earlier in the sentence, that is a visual request instead.
+- A second speaker (a mascot or character who talks alongside the narrator): declare it once with `Voice: NAME = VOICE` (voices
+  for characters: Puck, playful and young, male; Sky, light and lively, female; Echo, friendly and even, male; Nicole, soft, female),
+  then give it lines with `NAME: sentence` wherever a `Say:` could go (in the scene format, `NAME: "…"` on its own line). The narrator
+  keeps every line not marked. Keep a character's lines short, warm and in its own voice (a mascot greets, reacts, sums up, asks the
+  viewer something), and alternate with the narrator rather than giving it long passages. Put the character's talking image on the
+  slides where it speaks (`Image:`): an image that "talks while NAME speaks" moves its mouth only on NAME's lines.
 
 # Writing narration
 - Write for the ear: short sentences (under 25 words), plain words, second person ("you"), one idea per sentence.
@@ -107,6 +113,9 @@ name and a description. You may also see images the person attached to their mes
   result of the op before it, so you can chain (remove_background, then talk on "previous"). Give each result a short clear `name`,
   and set `kind` (mascot, logo, icon, photo, background, other) when it changes. Unused fields are null.
 - An attached image is already in the library (its ID is given). Say what you did in one line; the new images appear in the chat.
+- Video clips are in the library too (marked "video clip"). `Image: NAME` puts one on a slide: it plays silently from when the slide
+  appears. A clip of a character speaking can become a talking character with `character` (asset = the clip; the studio finds the
+  speaking part); the new image talks while its speaker does once it "speaks as" that speaker (the person sets that in the library).
 - You can't draw new pictures or change what is in one (no generating, recolouring, adding or removing objects other than the
   background). Say so plainly and offer what you can do. Every image can be downloaded as PNG, JPG, WebP or GIF from Settings > Media.
 
@@ -235,7 +244,7 @@ def diff(old_text, new_text):
     rows = []
     if old is None or old.intro != new.intro or old.title != new.title or old.subtitle != new.subtitle:
         rows.append({"slide": "s0", "title": new.title, "kind": "added" if old is None else "changed"})
-    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note)
+    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers))
     olds, news = [] if old is None else [key(s) for s in old.slides], [key(s) for s in new.slides]
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, olds, news, autojunk=False).get_opcodes():
         if op == "equal":

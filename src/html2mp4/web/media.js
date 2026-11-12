@@ -3,7 +3,7 @@
 const M = {items: [], kinds: [], open: null, crop: null};
 const KIND_LABEL = {mascot: "Mascot", logo: "Logo", icon: "Icon", photo: "Photo", background: "Background", other: "Other"};
 const kb = n => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
-const badge = it => it.animated ? ({talk: "Talks", character: "Alive"}[it.animated.mode] || "Moves") : it.transparent ? "Cut-out" : "";
+const badge = it => it.video ? "Clip" : it.animated ? ({talk: "Talks", character: "Alive"}[it.animated.mode] || "Moves") : it.transparent ? "Cut-out" : "";
 
 async function loadMedia(){
   const r = await api("/api/media").catch(() => ({items: [], kinds: []}));
@@ -41,21 +41,30 @@ $("#mdGrid").addEventListener("click", e => { const c = e.target.closest(".md-ca
 function openMedia(id){
   const it = M.items.find(x => x.id === id); if(!it) return;
   M.open = it; endCrop();
-  $("#mdImg").src = it.preview + "?t=" + Date.now(); $("#mdStage").classList.toggle("chk", !!it.transparent);
-  $("#mdName").value = it.name; $("#mdDesc").value = it.description || "";
+  const vid = $("#mdVid"); vid.hidden = !it.video; $("#mdImg").hidden = !!it.video;
+  if (it.video) { vid.src = it.url + "?t=" + Date.now(); vid.play().catch(() => {}); } else { vid.removeAttribute("src"); vid.load(); $("#mdImg").src = it.preview + "?t=" + Date.now(); }
+  $("#mdStage").classList.toggle("chk", !!it.transparent);
+  $("#mdName").value = it.name; $("#mdDesc").value = it.description || ""; $("#mdSpeaker").value = it.speaker || "";
+  $("#mdSpeakerL").hidden = !(it.animated && ["talk", "character"].includes(it.animated.mode));
   $("#mdKind").innerHTML = M.kinds.map(k => `<option value="${k}" ${k === it.kind ? "selected" : ""}>${KIND_LABEL[k] || k}</option>`).join("");
   $("#mdMeta").textContent = [`${it.w}×${it.h}`, kb(it.bytes), it.format.toUpperCase(), it.transparent ? "transparent background" : "",
+    it.video ? `${it.seconds} s clip` + (it.speech && it.speech.length ? `, speaks ${it.speech.map(([a, b]) => `${a}–${b} s`).join(", ")}` : ", no speech") : "",
+    it.speaker ? `speaks as ${it.speaker}` : "",
     it.animated ? ({talk: "talks while the narrator speaks", character: "always moving; talks while the narrator speaks"}[it.animated.mode] || "loops") : "", it.note ? `made by ${it.note.replace(/_/g, " ")}` : ""].filter(Boolean).join(" · ");
-  const fmts = it.format === "svg" ? [["svg"]] : it.animated ? [["gif"], ...(it.animated.rows > 1 ? [["gif", 1]] : []), ["webp"], ["png"]] : [["png"], ["jpg"], ["webp"], ["gif"]];
-  $("#mdDl").innerHTML = fmts.map(([f, row]) => `<a class="link" href="/api/media/${encodeURIComponent(it.id)}/download?format=${f}${row ? "&row=1" : ""}">${f.toUpperCase()}${row ? " (talking)" : ""}${it.animated && f === "png" ? " (first frame)" : ""}</a>`).join("");
+  const fmts = it.format === "svg" ? [["svg"]] : it.video ? [["webm"], ["png"]] : it.animated ? [["gif"], ...(it.animated.rows > 1 ? [["gif", 1]] : []), ["webp"], ["png"]] : [["png"], ["jpg"], ["webp"], ["gif"]];
+  $("#mdDl").innerHTML = fmts.map(([f, row]) => `<a class="link" href="/api/media/${encodeURIComponent(it.id)}/download?format=${f}${row ? "&row=1" : ""}">${f.toUpperCase()}${row ? " (talking)" : ""}${(it.animated || it.video) && f === "png" ? " (first frame)" : ""}</a>`).join("");
   document.querySelectorAll("#mdDlg .md-acts button").forEach(b => { const op = b.dataset.op || "crop";
-    b.disabled = it.format === "svg" || (!!it.animated && !["resize", "flip", "trim", "pad", "rotate", "crop"].includes(op)) || (op === "animate" && !it.transparent); });
+    b.hidden = op === "character" ? !it.video : (it.video && op !== "remove_background");
+    b.disabled = it.format === "svg" || (!!it.animated && !["resize", "flip", "trim", "pad", "rotate", "crop"].includes(op)) || (op === "animate" && !it.transparent)
+      || (op === "character" && !(it.speech && it.speech.length)); });
+  $("#mdDlg [data-op=character]").title = it.speech && it.speech.length ? "Makes a talking character from this clip: the quiet part becomes its idle loop, the speaking part its talking loop" : "This clip has no speech, so there's no talking part to use";
   $("#mdDlg [data-op=animate]").title = it.transparent ? "Claude finds the tail, ears and tongue; they move, the character breathes, and its mouth talks while the narrator speaks" : "Remove the background first: this works on a cut-out";
   $("#mdStatus").textContent = ""; $("#mdDlg").open || $("#mdDlg").showModal();
 }
 $("#mdClose").addEventListener("click", () => $("#mdDlg").close());
+$("#mdDlg").addEventListener("close", () => $("#mdVid").pause());
 $("#mdSave").addEventListener("click", async () => {
-  try{ await post(`/api/media/${M.open.id}`, {name: $("#mdName").value, kind: $("#mdKind").value, description: $("#mdDesc").value}, "PATCH"); await loadMedia(); openMedia(M.open.id); toast("Saved"); }
+  try{ await post(`/api/media/${M.open.id}`, {name: $("#mdName").value, kind: $("#mdKind").value, description: $("#mdDesc").value, speaker: $("#mdSpeaker").value}, "PATCH"); await loadMedia(); openMedia(M.open.id); toast("Saved"); }
   catch(err){ toast(err.message); }
 });
 $("#mdDescribe").addEventListener("click", async () => {

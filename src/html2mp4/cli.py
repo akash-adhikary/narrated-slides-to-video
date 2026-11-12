@@ -50,7 +50,7 @@ class Cancelled(Exception):
 
 class ConversionError(Exception):
     """A problem with the input or settings, with a message meant for the person converting."""
-RENDER_VERSION = 7                      # bump to invalidate cached video renders
+RENDER_VERSION = 8                      # bump to invalidate cached video renders
 
 FPS = 30
 # Output size; the stage is rendered natively at that scale (vector-sharp, never upscaled). 1440p keeps colour detail at
@@ -78,6 +78,8 @@ PAGE_JS = """
   items.flat().forEach(e => { const d = e.getAttribute('data-d'); if (d) e.style.setProperty('--d', d + 's'); });
   const stage = document.getElementById('stage');
   const started = new Map();
+  let slideStart = 0;
+  document.querySelectorAll('video[data-h2m-video]').forEach(v => { v.muted = true; v.pause(); });
   const secs = v => v.split(',').map(x => parseFloat(x) * (x.trim().endsWith('ms') ? 0.001 : 1));
   const span = root => {                  // longest delay+duration of the element's (and its children's) transitions and finite animations
     let m = 0;
@@ -96,6 +98,10 @@ PAGE_JS = """
     if (!started.has(a)) { started.set(a, loops(a) ? 0 : t); a.pause(); }
     a.currentTime = Math.max(0, (t - started.get(a)) * 1000);
   });
+  const talking = who => {
+    stage.classList.toggle('speaking', who !== null && who !== undefined && who !== false);
+    if (typeof who === 'string' && who) stage.setAttribute('data-speaker', who); else stage.removeAttribute('data-speaker');
+  };
   const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
   const CUE_LEAD = 0.25;                  // a word-timed graphic starts this early, so it is readable as the word is heard
   window.__html2mp4 = {
@@ -120,12 +126,26 @@ PAGE_JS = """
       started.clear();
     },
     show: (si, ci, t) => {                // same rule as the page's own render()
+      if (!scenes[si].classList.contains('active')) slideStart = t;      // a slide's video clips play from when it appears
       seek(t);
       scenes.forEach((s, i) => s.classList.toggle('active', i === si));
       items.forEach((list, i) => list.forEach(e => e.classList.toggle('on', i < si || (i === si && +e.dataset.c <= ci))));
       seek(t);
     },
-    frame: (t, speaking) => { stage.classList.toggle('speaking', !!speaking); seek(t); },   // a talking character moves only while the voice does
+    // a talking character moves only while the voice does: `speaking` is null (silence), "" (the narrator) or a speaker's name.
+    // Video clips on the active slide show the exact moment since the slide appeared (each frame waits for the clip to get there).
+    frame: (t, speaking) => {
+      talking(speaking); seek(t);
+      const active = scenes.find(s => s.classList.contains('active'));
+      const clips = active ? [...active.querySelectorAll('video[data-h2m-video]')] : [];
+      if (!clips.length) return null;
+      return Promise.all(clips.map(v => new Promise(done => {
+        const want = Math.max(0, Math.min((v.duration || 0) - 0.001, t - slideStart));
+        if (v.readyState >= 2 && Math.abs(v.currentTime - want) < 0.001) return done();
+        const ok = () => { v.removeEventListener('seeked', ok); requestAnimationFrame(() => done()); };
+        v.addEventListener('seeked', ok); setTimeout(ok, 3000); v.pause(); v.currentTime = want;
+      })));
+    },
   };
 }
 """
@@ -144,9 +164,15 @@ def load_scenes(html_text):
     if not m: raise ConversionError("This file doesn't contain a narration script, so it isn't a narrated slide module. "
                                     "Check you picked the right file (technical detail: no `var scenes = [...]` list).")
     scenes = []
-    for s in re.finditer(r"\{\s*id\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*(?:hold\s*:\s*([\d.]+)\s*,\s*)?chunks\s*:\s*\[(.*?)\]\s*\}", m.group(1), re.S):
-        chunks = [json.loads('"' + c + '"') for c in re.findall(r'"((?:[^"\\]|\\.)*)"', s.group(3))]
-        scenes.append({"id": s.group(1), "chunks": chunks, **({"hold": float(s.group(2))} if s.group(2) else {})})
+    vm = re.search(r"var voices = (\{.*?\});", html_text)
+    voices = json.loads(vm.group(1)) if vm else {}
+    for s in re.finditer(r"\{\s*id\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*(?:hold\s*:\s*([\d.]+)\s*,\s*)?(?:who\s*:\s*(\{[^}]*\})\s*,\s*)?chunks\s*:\s*\[(.*?)\]\s*\}", m.group(1), re.S):
+        chunks = [json.loads('"' + c + '"') for c in re.findall(r'"((?:[^"\\]|\\.)*)"', s.group(4))]
+        sc = {"id": s.group(1), "chunks": chunks, **({"hold": float(s.group(2))} if s.group(2) else {})}
+        if s.group(3):                  # sentences said by someone other than the narrator: their name and voice, by index
+            who = {int(k): v for k, v in json.loads(s.group(3)).items()}
+            sc["who"] = who; sc["voices"] = {i: voices[w] for i, w in who.items() if w in voices}
+        scenes.append(sc)
     if not scenes or not any(s["chunks"] for s in scenes):
         raise ConversionError("The narration script in this file is empty.")
     missing = [s["id"] for s in scenes if f'id="{s["id"]}"' not in html_text and f"id='{s['id']}'" not in html_text]
@@ -210,25 +236,41 @@ def clip_path(text, voice, speed, cache, pronounce=None):
 
 def pending(scenes, voice, speed, cache, pronounce=None, timings=False):
     """How many different sentences still need voicing (or their word timings)."""
-    need = lambda c: not clip_path(c, voice, speed, cache, pronounce).exists() or (timings and not clip_path(c, voice, speed, cache, pronounce).with_suffix(".json").exists())
-    return len(dict.fromkeys(c for sc in scenes for c in sc["chunks"] if need(c)))
+    return len({(c, chunk_voice(sc, ci, voice)) for sc in scenes for ci, c in enumerate(sc["chunks"]) if _needs(c, chunk_voice(sc, ci, voice), speed, cache, pronounce, timings)})
 
 
 def synthesize(scenes, voice, speed, cache, progress=lambda f: None, pronounce=None, timings=False, status=None):
     """Voice every sentence (cached). With timings=True, also make sure each clip has its word-timing file.
     `status("waiting")` is called if another synthesis holds the voice, then `status("loading")` once this one starts."""
     cache.mkdir(parents=True, exist_ok=True)
-    key = lambda text: clip_path(text, voice, speed, cache, pronounce)
-    need = lambda c: not key(c).exists() or (timings and not key(c).with_suffix(".json").exists())
-    todo = list(dict.fromkeys(c for sc in scenes for c in sc["chunks"] if need(c)))
-    if todo:
-        log(f"narrating {len(todo)} sentence(s) with Kokoro voice '{voice}' at {speed}x")
+    groups = {}                                                         # voice -> sentences it says (a second speaker has its own voice)
+    for sc in scenes:
+        for ci, c in enumerate(sc["chunks"]): groups.setdefault(chunk_voice(sc, ci, voice), []).append(c)
+    total = sum(1 for v, cs in groups.items() for c in dict.fromkeys(cs) if _needs(c, v, speed, cache, pronounce, timings))
+    done = 0
+    for v, cs in groups.items():
+        key = lambda text, v=v: clip_path(text, v, speed, cache, pronounce)
+        need = lambda c, v=v: _needs(c, v, speed, cache, pronounce, timings)
+        todo = list(dict.fromkeys(c for c in cs if need(c)))
+        if not todo: continue
+        log(f"narrating {len(todo)} sentence(s) with Kokoro voice '{v}' at {speed}x")
         import warnings; warnings.filterwarnings("ignore")
         if status and _TTS_LOCK.locked(): status("waiting")
         with _TTS_LOCK:
             if status: status("loading")
-            _synthesize_todo(todo, voice, speed, key, progress, lambda t: spoken(t, pronounce), need)
-    return [[sf.read(key(c), dtype="float32")[0] for c in sc["chunks"]] for sc in scenes]
+            _synthesize_todo(todo, v, speed, key, lambda f, d=done, n=len(todo): progress((d + f * n) / max(1, total)), lambda t: spoken(t, pronounce), need)
+        done += len(todo)
+    return [[sf.read(clip_path(c, chunk_voice(sc, ci, voice), speed, cache, pronounce), dtype="float32")[0] for ci, c in enumerate(sc["chunks"])] for sc in scenes]
+
+
+def chunk_voice(scene, ci, voice):
+    """The voice that says sentence `ci` of a scene: its speaker's, or the narrator's."""
+    return (scene.get("voices") or {}).get(ci, voice)
+
+
+def _needs(text, voice, speed, cache, pronounce, timings):
+    f = clip_path(text, voice, speed, cache, pronounce)
+    return not f.exists() or (timings and not f.with_suffix(".json").exists())
 
 
 def word_times(scenes, voice, speed, cache, pronounce=None):
@@ -236,8 +278,8 @@ def word_times(scenes, voice, speed, cache, pronounce=None):
     out = []
     for sc in scenes:
         row = []
-        for c in sc["chunks"]:
-            f = clip_path(c, voice, speed, cache, pronounce).with_suffix(".json")
+        for ci, c in enumerate(sc["chunks"]):
+            f = clip_path(c, chunk_voice(sc, ci, voice), speed, cache, pronounce).with_suffix(".json")
             row.append([tuple(x) for x in json.loads(f.read_text())] if f.exists() else [])
         out.append(row)
     return out
@@ -300,7 +342,7 @@ def build_timeline(scenes, audio, spans, hold=0.0):
             a = audio[si][ci]
             ev = max(0.0, t - VISUAL_LEAD)
             events.append((ev, si, ci))
-            clips.append((t, a, text))
+            clips.append((t, a, text, (sc.get("who") or {}).get(ci, "")))     # who says it ("" = the narrator)
             visual_end = max(visual_end, ev + spans[si].get(str(ci), 0) + SETTLE_HOLD)
             t += len(a) / TTS_SR + CHUNK_GAP
         t = max(t, visual_end) + float(sc.get("hold", hold))
@@ -341,7 +383,8 @@ def render_segment(job):
             while ei < len(events) and events[ei][0] <= t:
                 et, si, ci = events[ei]
                 page.evaluate(f"__html2mp4.show({si},{ci},{et})"); ei += 1
-            page.evaluate(f"__html2mp4.frame({t}, {'true' if any(a <= t < b for a, b in speech) else 'false'})")
+            who = next((w for a, b, w in speech if a <= t < b), None)
+            page.evaluate(f"__html2mp4.frame({t}, {json.dumps(who)})")
             # CDP ignores the emulated device scale unless the clip carries it explicitly
             shot = cdp.send("Page.captureScreenshot", {"format": "png", "optimizeForSpeed": True, "clip": clip})
             import base64; png = base64.b64decode(shot["data"])
@@ -356,8 +399,9 @@ def render_segment(job):
 
 def render_video(html, ids, events, total, work, workers, progress=lambda f: None, size=(1920, 1080), crf=CRF, fast=False,
                  cancel=None, nice=0, pausable=False, times=None, speech=()):
-    """`speech`: [(start, end)] seconds when the narrator is speaking (a talking character moves only then)."""
-    nframes = int(round(total * FPS)); speech = [(round(a, 3), round(b, 3)) for a, b in speech]
+    """`speech`: [(start, end, who)] seconds when someone is speaking ("" = the narrator, or the speaker's name): a talking
+    character moves only then (a character that is a named speaker only while that speaker talks)."""
+    nframes = int(round(total * FPS)); speech = [(round(x[0], 3), round(x[1], 3), x[2] if len(x) > 2 else "") for x in speech]
     key = hashlib.sha256(json.dumps([RENDER_VERSION, html.read_text(), ids, events, nframes, FPS, size, crf, fast, times, speech]).encode()).hexdigest()
     video, keyfile = work / "video.mp4", work / "video.key"
     if video.exists() and keyfile.exists() and keyfile.read_text() == key:
@@ -419,7 +463,7 @@ def resolve_music(arg):
 
 def master_audio(clips, total, music, music_level, work):
     mix = np.zeros(int((total + 1) * TTS_SR), dtype=np.float32)
-    for t, a, _ in clips:
+    for t, a, *_ in clips:
         i = int(round(t * TTS_SR)); seg = mix[i:i + len(a)]; seg += a[:len(seg)]
     sf.write(work / "voice_raw.wav", mix[: int(total * TTS_SR)], TTS_SR)
     loudnorm(work / "voice_raw.wav", work / "voice.wav",
@@ -447,7 +491,7 @@ def master_audio(clips, total, music, music_level, work):
     # ducking: music sits `music_level` dB under the voice while speaking, rises 6 dB in pauses
     hop = SR // 100
     speaking = np.zeros(n // hop + 1)
-    for t, a, _ in clips:
+    for t, a, *_ in clips:
         speaking[int((t - 0.25) * 100): int((t + len(a) / TTS_SR + 0.35) * 100)] = 1
     target = np.where(speaking > 0, -music_level, -music_level + 6.0)
     g, cur = np.empty_like(target), target[0]
@@ -481,7 +525,7 @@ def balanced_cues(text, max_chars=80):
 
 def captions(clips, srt, vtt):
     cues = []
-    for t, a, text in clips:
+    for t, a, text, *_ in clips:
         sentences = []                                                 # break at sentence ends,
         for s in re.split(r"(?<=[.?!])\s+(?=[A-Z])", text):            # but keep short ones ("Select.")
             sentences.append(f"{sentences.pop()} {s}" if sentences and len(sentences[-1]) < 24 else s)
@@ -507,6 +551,12 @@ VOICES = {   # curated Kokoro voices: id -> (name, description)
     "am_fenrir":  ("Fenrir",  "Deep and steady · US male"),
     "bf_emma":    ("Emma",    "Clear and polished · UK female"),
     "bm_george":  ("George",  "Measured and classic · UK male"),
+}
+CHARACTER_VOICES = {   # extra voices for a second speaker (a mascot or character), named in a script's "Voice:" line
+    "am_puck":    ("Puck",    "Playful and young · US male"),
+    "af_nicole":  ("Nicole",  "Soft and close · US female"),
+    "am_echo":    ("Echo",    "Friendly and even · US male"),
+    "af_sky":     ("Sky",     "Light and lively · US female"),
 }
 
 # share of the overall progress bar each step takes (rendering frames dominates)
@@ -581,7 +631,7 @@ def convert(html, out=None, voice="af_heart", speed=0.90, music="gentle-pulse", 
     step("layout")
     video = render_video(html, ids, events, total, work, workers, step("frames"), cancel=cancel, nice=nice, pausable=pausable,
                          size=QUALITIES[quality], fast=bool(preview_seconds), times=times,
-                         speech=[(t, t + len(a) / TTS_SR) for t, a, _ in clips])
+                         speech=[(t, t + len(a) / TTS_SR, who) for t, a, _, who in clips])
     step("audio")
     wav = master_audio(clips, total, music_path, music_level, work)
     step("finish")

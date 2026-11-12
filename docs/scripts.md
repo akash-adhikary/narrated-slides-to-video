@@ -30,6 +30,16 @@ WebP, GIF or SVG (or drop them on the card). Each image is cleaned on the way in
 photo's GPS location removed, very large images scaled down, and SVGs checked for scripts. Claude writes a short description of each
 one (the slide designer reads it), which you can edit, along with its name and kind (mascot, logo, icon, photo, background).
 
+**Video clips.** Upload MP4, MOV or WebM clips (up to a minute) the same way. A clip plays silently on its slide from the moment the
+slide appears, in the player and in the video (the narration is the soundtrack). If the clip has someone speaking, the library
+notes when; **Make a talking character** turns a clip of a character speaking into a talking character: the quiet part becomes its
+idle loop, the speaking part its talking loop, with the background removed on this computer. Set **Speaks as** so it talks on its
+speaker's lines (see [A second speaker](#a-second-speaker-a-mascot-that-talks)). A clip made with an AI video tool (for example a
+mascot animated from its picture) is a good source.
+
+**Remove background** no longer needs a box when the picture has a plain backdrop: the subject is found by itself, and the backdrop
+is never mistaken for the subject.
+
 **Using an image on a slide.** Add an `Image:` line under the slide's heading, with the image's name:
 
 ```
@@ -126,6 +136,22 @@ quickly, give it more time in either of two ways:
 
 If the graphic would simply be better appearing earlier in the sentence, that is a change to how the slide looks: ask for it in the
 chat or in "Ask for a change".
+
+### A second speaker (a mascot that talks)
+
+A character can speak alongside the narrator, in its own voice. Name it once, anywhere in the script, with the voice it uses:
+
+```
+Voice: Spotter = Puck
+```
+
+then give it lines wherever narration could go: `Spotter: "Hi, I'm Spotter!"` on its own line in a scene (or `Spotter: Hi there.`
+in the `Say:` format). Every line not marked is the narrator's. Character voices: **Puck** (playful and young), **Sky** (light and
+lively), **Echo** (friendly and even) and **Nicole** (soft); any narrator voice works too. Without `= …` it is Puck.
+
+Put the character on the slides where it speaks with an `Image:` line. A talking image marked **Speaks as: Spotter** in the media
+library moves its mouth only on Spotter's lines (and stays alive, without talking, while the narrator speaks); one with no speaker
+talks with the narrator. In the preview player with your browser's voice, the character's lines are spoken at a higher pitch.
 
 ### Say / Show
 

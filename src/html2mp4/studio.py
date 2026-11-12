@@ -889,7 +889,7 @@ def export_module(pid: str, format: str = "json", history: bool = False, v: int 
 media_jobs = {}                       # id -> an edit running in the background (removing a background can take a while the first time)
 
 
-def media_view(it): return {**it, "url": f"/api/media/{it['id']}/file", "preview": f"/api/media/{it['id']}/preview"}
+def media_view(it): return {**it, "url": f"/api/media/{it['id']}/file", "preview": f"/api/media/{it['id']}/preview", "video": it["format"] in media.VIDEO_FORMATS}
 
 
 @app.get("/api/media")
@@ -909,7 +909,7 @@ def upload_media(files: list[UploadFile] = File(...)):
     """Add one or more images to the library. Claude writes a description of each in the background (when an API key is set)."""
     out, errors = [], []
     for f in files[:20]:
-        try: out.append(media.add(f.file.read(media.MAX_UPLOAD + 1), f.filename or "image"))
+        try: out.append(media.add(f.file.read(media.MAX_VIDEO_UPLOAD + 1), f.filename or "image"))
         except media.MediaError as e: errors.append(f"{f.filename}: {e}")
     if not out and errors: raise HTTPException(422, "; ".join(errors))
     _describe_later([i["id"] for i in out])
@@ -932,7 +932,7 @@ def media_file(iid: str):
 def media_preview(iid: str):
     """What to show for the image in the Studio: an animation plays (as animated WebP); anything else is a small still."""
     it = _item(iid)
-    try: data, mime = media.export(it, "webp") if it.get("animated") else media.thumb(it, 480)
+    try: data, mime = media.export(it, "webp") if it.get("animated") else media.thumb(it, 480)    # a clip's still is its poster frame
     except media.MediaError as e: raise HTTPException(400, str(e))
     return Response(data, media_type=mime, headers={"Cache-Control": "no-store"})
 
@@ -953,12 +953,13 @@ class MediaPatchIn(BaseModel):
     name: str | None = None
     kind: str | None = None
     description: str | None = None
+    speaker: str | None = None                                         # a character speaks as this speaker in scripts ("" = the narrator)
 
 
 @app.patch("/api/media/{iid}")
 def patch_media(iid: str, body: MediaPatchIn):
     _item(iid)
-    try: return media_view(media.update(iid, body.name, body.kind, body.description))
+    try: return media_view(media.update(iid, body.name, body.kind, body.description, body.speaker))
     except media.MediaError as e: raise HTTPException(400, str(e))
 
 
@@ -1025,7 +1026,7 @@ def narration_plan(pid, v):
     scenes = cli.load_scenes(page)
     pron = config.glossary().get("pronunciations", {})
     cache = cli.CACHE / "tts"
-    files = [[cli.clip_path(c, NARRATION_VOICE, NARRATION_SPEED, cache, pron) for c in sc["chunks"]] for sc in scenes]
+    files = [[cli.clip_path(c, cli.chunk_voice(sc, ci, NARRATION_VOICE), NARRATION_SPEED, cache, pron) for ci, c in enumerate(sc["chunks"])] for sc in scenes]
     return scenes, pron, cache, files
 
 
@@ -1101,7 +1102,7 @@ def align_slides(old_text, new_text):
     ids that need designing. Adding or removing a slide in the middle therefore doesn't redesign the slides after it."""
     import difflib
     old, new = script.parse(old_text), script.parse(new_text)
-    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note)
+    key = lambda s: (s.title, tuple(s.say), tuple(s.show), s.screen, s.note, tuple(s.images), tuple(s.speakers))
     remap, changed = {}, []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [key(x) for x in old.slides], [key(x) for x in new.slides], autojunk=False).get_opcodes():
         if op == "equal":

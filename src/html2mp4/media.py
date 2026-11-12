@@ -68,7 +68,7 @@ def _unique_name(name, items, exclude=None):
     return out
 
 
-def update(item_id, name=None, kind=None, description=None):
+def update(item_id, name=None, kind=None, description=None, speaker=None):
     with _lock:
         items = listing(); it = next((i for i in items if i["id"] == item_id), None)
         if it is None: raise MediaError("That image isn't in the library.")
@@ -82,6 +82,10 @@ def update(item_id, name=None, kind=None, description=None):
             if kind not in KINDS: raise MediaError(f"The kind must be one of: {', '.join(KINDS)}.")
             it["kind"] = kind
         if description is not None: it["description"] = str(description).strip()[:400]
+        if speaker is not None:                      # the script's speaker this character speaks as ("" = the narrator)
+            speaker = re.sub(r"\s+", " ", str(speaker)).strip()[:30]
+            if speaker: it["speaker"] = speaker
+            else: it.pop("speaker", None)
         _save(items); return it
 
 
@@ -139,7 +143,8 @@ def _sprite(frames, fmt="webp"):
 
 
 def add(raw, filename="image", name=None, kind=None, description="", parent=None, note=""):
-    """Add an uploaded file. Returns the new item."""
+    """Add an uploaded file (an image, or a video clip). Returns the new item."""
+    if is_video(raw, filename): return add_video(raw, filename, name, kind, description)
     if len(raw) > MAX_UPLOAD: raise MediaError("That file is too large (25 MB at most).")
     stem = re.sub(r"[_\-]+", " ", pathlib.Path(filename).stem).strip() or "Image"
     animated = None
@@ -167,7 +172,7 @@ def add(raw, filename="image", name=None, kind=None, description="", parent=None
     return _store(data, fmt, w, h, alpha, name or stem, kind, description, parent, note, animated)
 
 
-def _store(data, fmt, w, h, alpha, name, kind, description, parent, note, animated=None):
+def _store(data, fmt, w, h, alpha, name, kind, description, parent, note, animated=None, extra=None):
     with _lock:
         items = listing()
         name = _unique_name(name, items)
@@ -176,7 +181,7 @@ def _store(data, fmt, w, h, alpha, name, kind, description, parent, note, animat
         (MEDIA / f"{iid}.{fmt}").write_bytes(data)
         it = {"id": iid, "name": name, "kind": kind if kind in KINDS else _guess_kind(w, h, alpha), "description": description or "",
               "file": f"{iid}.{fmt}", "format": fmt, "w": w, "h": h, "transparent": bool(alpha), "bytes": len(data),
-              "animated": animated, "created": time.time(), "parent": parent, "note": note}
+              "animated": animated, "created": time.time(), "parent": parent, "note": note, **(extra or {})}
         items.append(it); _save(items)
         return it
 
@@ -191,6 +196,7 @@ def _guess_kind(w, h, alpha):
 def image(item, frame=0, row=0):
     """The item as a Pillow image (an animation's frame `frame`, of row `row`: a character's idle loop is row 0, talking row 1)."""
     if item["format"] == "svg": raise MediaError("SVG images can't be edited here. Convert it to PNG first (open it and export it as PNG).")
+    if item["format"] in VIDEO_FORMATS: return video_frame(item, item.get("poster", 0.0))     # a clip's picture is its poster frame
     im = Image.open(path(item)); im.load()
     if item.get("animated"):
         w, h = item["w"], item["h"]; row = min(row, item["animated"].get("rows", 1) - 1)
@@ -203,7 +209,7 @@ def frames(item, row=0):
     return [image(item, k, row) for k in range(item["animated"]["frames"])]
 
 
-MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif"}
+MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif", "webm": "video/webm"}
 
 
 def data_uri(item):
@@ -214,6 +220,11 @@ def export(item, fmt, row=0):
     """The image as a file to download, in png, jpg, webp or gif (an animation becomes an animated gif or webp; `row` 1 is a
     character's talking loop)."""
     fmt = {"jpeg": "jpg"}.get(fmt, fmt)
+    if item["format"] in VIDEO_FORMATS:
+        if fmt == "webm": return path(item).read_bytes(), MIME["webm"]
+        if fmt in ("png", "jpg", "webp"): fr = [image(item)]                # its poster frame
+        else: raise MediaError("A video clip downloads as WebM, or its first picture as PNG, JPG or WebP.")
+        buf = io.BytesIO(); fr[0].convert("RGB" if fmt == "jpg" else "RGBA").save(buf, {"jpg": "JPEG"}.get(fmt, fmt.upper())); return buf.getvalue(), MIME[fmt]
     if fmt not in ("png", "jpg", "webp", "gif"): raise MediaError("Choose png, jpg, webp or gif.")
     if item["format"] == "svg":
         if fmt != "png": raise MediaError("An SVG can be downloaded as it is, or as PNG.")
@@ -270,7 +281,8 @@ def _jpeg(im):
 
 # ---------------------------------------------------------------- edits (each makes a new item)
 
-OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate")
+OPS = ("crop", "trim", "resize", "rotate", "flip", "remove_background", "convert", "pad", "talk", "bob", "animate", "character")
+VIDEO_OPS = ("remove_background", "character")                            # the edits a video clip can have
 
 
 def _box(b, w, h, name="box"):
@@ -282,12 +294,17 @@ def _box(b, w, h, name="box"):
     return round(x0 * w), round(y0 * h), round(x1 * w), round(y1 * h)
 
 
-def edit(item_id, op, params=None, name=None):
+def edit(item_id, op, params=None, name=None, status=None):
     """Apply one edit and save the result as a new item. Returns it."""
     params = dict(params or {})
     src = get(item_id)
     if src is None: raise MediaError("That image isn't in the library.")
     if op not in OPS: raise MediaError(f"Unknown edit “{op}”. Available: {', '.join(OPS)}.")
+    if src["format"] in VIDEO_FORMATS:
+        if op == "remove_background": return video_cutout(src, params, name, status)
+        if op == "character": return video_character(src, params, name, status)
+        raise MediaError(f"A video clip can have these edits: remove the background, or make a talking character from it.")
+    if op == "character": raise MediaError("A talking character is made from a video clip of the character speaking. Upload the clip first.")
     if op == "convert" and src.get("animated"): raise MediaError("An animation stays an animation. Download it as GIF or WebP instead.")
     if op in ("talk", "bob", "animate") and src.get("animated"): raise MediaError("This image is already animated. Start from the still picture.")
     fr = frames(src) if op not in ("talk", "bob", "animate") else [image(src)]
@@ -363,17 +380,44 @@ def _load_sam(status=None):
     return _sam["proc"], _sam["model"]
 
 
+def subject_box(im):
+    """Where the subject is, as fractions [x0, y0, x1, y1], when that is clear without asking anyone: the opaque part of a
+    picture with transparency, or whatever stands out from a plain backdrop (the colour along the edges). None if unclear."""
+    import numpy as np
+    if im.mode == "RGBA" and _has_alpha(im):
+        bb = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+        return [bb[0] / im.width, bb[1] / im.height, bb[2] / im.width, bb[3] / im.height] if bb else None
+    a = np.asarray(im.convert("RGB")).astype(np.int16); h, w = a.shape[:2]
+    rim = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+    bg = np.median(rim, axis=0)
+    if (np.abs(rim - bg).sum(1) < 40).mean() < 0.6: return None        # a busy backdrop (a photo): no plain colour to stand out from
+    ys, xs = np.where(np.abs(a - bg).sum(2) > 60)
+    if len(xs) < 0.01 * w * h: return None
+    x0, x1, y0, y1 = np.percentile(xs, 0.2), np.percentile(xs, 99.8), np.percentile(ys, 0.2), np.percentile(ys, 99.8)
+    mx, my = 0.02 * w, 0.02 * h
+    return [float(max(0, x0 - mx) / w), float(max(0, y0 - my) / h), float(min(w, x1 + mx) / w), float(min(h, y1 + my) / h)]
+
+
 def remove_background(im, box=None, status=None):
     """The subject inside `box` (fractions [x0, y0, x1, y1]; the whole picture if None) on a transparent background, with soft edges."""
     import numpy as np, torch
     rgb = im.convert("RGB"); w, h = rgb.size
+    if not box: box = subject_box(im)                          # no box: find the subject first (a whole-picture box selects the backdrop)
     b = list(_box(box, w, h)) if box else [2, 2, w - 2, h - 2]
     proc, model = _load_sam(status)
     inp = proc(rgb, input_boxes=[[b]], return_tensors="pt")
     with torch.no_grad(): out = model(**inp, multimask_output=True)
     logits = proc.image_processor.post_process_masks(out.pred_masks, inp["original_sizes"], inp["reshaped_input_sizes"], binarize=False)[0][0]
-    best = int(out.iou_scores[0, 0].argmax())
-    a = torch.sigmoid(logits[best]).numpy()
+    masks = [torch.sigmoid(logits[k]).numpy() for k in range(logits.shape[0])]
+    # the subject doesn't cover the backdrop along the picture's edges; a mask that does is the background, so it is never the one
+    # kept (only the edge pixels that look like backdrop count: a subject may well touch the edge, cut off by the frame)
+    px = np.asarray(rgb).astype(np.int16); rim = np.concatenate([px[0], px[-1], px[:, 0], px[:, -1]])
+    plain = np.abs(rim - np.median(rim, axis=0)).sum(1) < 40
+    if plain.mean() < 0.3: plain = np.ones_like(plain)
+    edge = lambda m: float(np.concatenate([m[0], m[-1], m[:, 0], m[:, -1]])[plain].mean())
+    order = sorted(range(len(masks)), key=lambda k: -float(out.iou_scores[0, 0, k]))
+    best = next((k for k in order if edge(masks[k]) < 0.5), None)
+    a = masks[best] if best is not None else 1 - masks[order[0]]
     if box:                                                     # stay near the box (a glow may spill a little past it), ignore anything far away
         x0, y0, x1, y1 = b; mx, my = round((x1 - x0) * 0.2), round((y1 - y0) * 0.2)
         keep = np.zeros_like(a); keep[max(0, y0 - my):y1 + my, max(0, x0 - mx):x1 + mx] = 1; a = a * keep
@@ -435,12 +479,31 @@ ASSET_TAG = re.compile(r"<img\b([^>]*?)\bdata-asset\s*=\s*[\"']([^\"']+)[\"']([^
 SPRITE_CSS = """/*h2m:media*/
 .h2m-sprite{display:inline-block;background-repeat:no-repeat;background-position:0 0;max-width:100%}
 .h2m-sprite.h2m-loop{animation-name:h2m-sprite;animation-iteration-count:infinite}
-#stage.speaking .slide.active .h2m-sprite.h2m-talk{animation-name:h2m-sprite;animation-iteration-count:infinite}
-.h2m-sprite.h2m-char{animation-name:h2m-sprite-x;animation-iteration-count:infinite;background-position-y:0}
-#stage.speaking .slide.active .h2m-sprite.h2m-char{background-position-y:100%}
+#stage.speaking:not([data-speaker]) .slide.active .h2m-sprite.h2m-talk:not([data-speaker]){animation-name:h2m-sprite;animation-iteration-count:infinite}
+.h2m-sprite.h2m-char{animation-name:h2m-sprite-x;animation-iteration-count:infinite;background-position-y:0;position:relative}
+.h2m-sprite.h2m-char::after{content:"";position:absolute;inset:0;background-image:inherit;background-size:inherit;background-repeat:no-repeat;
+  background-position:0 100%;animation:inherit;animation-name:h2m-sprite-x;opacity:0;transition:opacity .16s ease}
+#stage.speaking:not([data-speaker]) .slide.active .h2m-sprite.h2m-char:not([data-speaker])::after{opacity:1}
 @keyframes h2m-sprite{to{background-position:100% 0}}
 @keyframes h2m-sprite-x{to{background-position-x:100%}}
 /*h2m:end*/"""
+
+
+def _attr(attrs, name):
+    """An attribute's value, written with double quotes, single quotes or none."""
+    m = re.search(rf'(?:^|\s){name}\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', attrs, re.I)
+    return None if not m else next(g for g in m.groups() if g is not None)
+
+
+def speaker_css(names):
+    """A character that speaks as someone (data-speaker="Spotter") talks only while that speaker does; an unnamed one talks with the
+    narrator. One rule per speaker, since CSS can't match two attributes against each other."""
+    out = []
+    for n in names or ():
+        q = json.dumps(str(n))
+        out.append(f"#stage.speaking[data-speaker={q}] .slide.active .h2m-sprite.h2m-char[data-speaker={q}]::after{{opacity:1}}\n"
+                   f"#stage.speaking[data-speaker={q}] .slide.active .h2m-sprite.h2m-talk[data-speaker={q}]{{animation-name:h2m-sprite;animation-iteration-count:infinite}}")
+    return "\n".join(out)
 
 
 def asset_ids(html): return [m.group(2) for m in ASSET_TAG.finditer(html or "")]
@@ -456,17 +519,21 @@ def resolve(html, lookup=None):
         iid = m.group(2); it = cache.get(iid) or lookup(iid)
         if it is None: missing.append(iid); return m.group(0)
         cache[iid] = it
-        alt = re.search(r'\balt\s*=\s*"([^"]*)"', attrs); alt = alt.group(1) if alt else _html.escape(it["name"], quote=True)
+        alt = _attr(attrs, "alt"); alt = _html.escape(_html.unescape(alt), quote=True) if alt is not None else _html.escape(it["name"], quote=True)
         attrs = re.sub(r'\s(?:src|alt)\s*=\s*("[^"]*"|\'[^\']*\'|\S+)', "", attrs).strip().rstrip("/").strip()
+        if it.get("speaker") and "data-speaker" not in attrs: attrs += f' data-speaker="{_html.escape(it["speaker"], quote=True)}"'   # who it speaks as
+        if it["format"] in VIDEO_FORMATS:                 # a clip: silent, and played in step with the slide (the player and the renderer drive it)
+            return (f'<video {attrs} src="{data_uri(it)}" aria-label="{alt}" data-asset="{iid}" data-h2m-video muted playsinline '
+                    f'preload="auto" disablepictureinpicture></video>').replace("  ", " ")
         if not it.get("animated"):
             return f'<img {attrs} src="{data_uri(it)}" alt="{alt}" data-asset="{iid}" draggable="false">'.replace("  ", " ")
         an = it["animated"]; n = an["frames"]
-        cls = re.search(r'\bclass\s*=\s*"([^"]*)"', attrs); style = re.search(r'\bstyle\s*=\s*"([^"]*)"', attrs)
-        rest = re.sub(r'\s(?:class|style)\s*=\s*"[^"]*"', "", " " + attrs).strip()
+        cls, style = _attr(attrs, "class"), _attr(attrs, "style")          # either quote style (a second class="" would be ignored by the browser)
+        rest = re.sub(r'\s(?:class|style)\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', "", " " + attrs).strip()
         mode = {"talk": "h2m-talk", "character": "h2m-char"}.get(an.get("mode"), "h2m-loop")
         css = (f"aspect-ratio:{it['w']}/{it['h']};background-image:url({data_uri(it)});background-size:{n * 100}% {an.get('rows', 1) * 100}%;"
-               f"animation-duration:{n / an['fps']:.3f}s;animation-timing-function:steps({n},jump-none);" + (style.group(1) if style else ""))
-        klass = f"h2m-sprite {mode}" + (f" {cls.group(1)}" if cls else "")
+               f"animation-duration:{n / an['fps']:.3f}s;animation-timing-function:steps({n},jump-none);" + (style or ""))
+        klass = f"h2m-sprite {mode}" + (f" {cls}" if cls else "")
         return f'<span role="img" aria-label="{alt}" data-asset="{iid}" class="{klass}" style="{css}"{(" " + rest) if rest else ""}></span>'
 
     return ASSET_TAG.sub(one, html or ""), missing
@@ -481,6 +548,8 @@ def catalog_text(items=None, limit=40):
         bits = [i["kind"], f"{i['w']}×{i['h']}", "transparent background" if i["transparent"] else "opaque",
                 {"talk": "animated: talks while the narrator speaks", "loop": "animated: loops",
                  "character": "animated character: always moving, and talks while the narrator speaks"}.get((i.get("animated") or {}).get("mode"), "")]
+        if i.get("speaker") and i.get("animated"): bits[-1] = bits[-1].replace("the narrator speaks", f"{i['speaker']} speaks (a speaker in the script)")
+        if i.get("format") in VIDEO_FORMATS: bits = [i["kind"], f"{i['w']}×{i['h']}", f"video clip, {i.get('seconds', 0):g} s, plays silently from the start of its slide"]
         rows.append(f"- {i['id']}: “{i['name']}” ({', '.join(b for b in bits if b)})" + (f". {i['description']}" if i.get("description") else ""))
     return "\n".join(rows)
 
@@ -569,6 +638,7 @@ def smart_edit(item_id, op, params=None, name=None, call=None, status=None):
     params, cost = dict(params or {}), 0.0
     it = get(item_id)
     if it is None: raise MediaError("That image isn't in the library.")
+    if it["format"] in VIDEO_FORMATS: return edit(item_id, op, params, name, status), 0.0      # a clip's subject is found in every frame
     if op == "remove_background" and not params.get("box"):
         if it.get("subject"): params["box"] = it["subject"]
         else:
@@ -768,3 +838,199 @@ def _sprite_rows(rows):
         for k, f in enumerate(row): sheet.paste(f.convert("RGBA").resize((fw, fh), Image.LANCZOS), (k * fw, r * fh))
     buf = io.BytesIO(); sheet.save(buf, "WEBP", quality=90, method=5)
     return buf.getvalue(), fw, fh
+
+
+# ---------------------------------------------------------------- video clips
+# A clip is kept as WebM (VP9), whatever was uploaded: the video renderer's browser plays it, it can carry transparency, and with a
+# keyframe every half second the renderer can show any exact moment of it. Clips are silent on a slide (the narration is the
+# soundtrack), so their sound isn't kept, but when it was speech, when it spoke is: that is how a talking character is made from one.
+
+VIDEO_FORMATS = ("webm",)
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
+MAX_VIDEO_UPLOAD, MAX_VIDEO_SECONDS, VIDEO_MAX_SIDE = 200 * 1024 * 1024, 60, 1280
+
+
+def is_video(raw, filename=""):
+    return pathlib.Path(filename).suffix.lower() in VIDEO_EXT or raw[4:8] == b"ftyp" or raw[:4] == b"\x1a\x45\xdf\xa3"
+
+
+def _ffmpeg():
+    from html2mp4.cli import FFMPEG
+    return FFMPEG
+
+
+def _probe(src):
+    """(width, height, seconds, fps, has sound) of a video file, read from ffmpeg's own report."""
+    import subprocess
+    err = subprocess.run([_ffmpeg(), "-hide_banner", "-i", str(src)], capture_output=True, text=True).stderr
+    d = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", err); v = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", err)
+    if not d or not v: raise MediaError("That file isn't a video this app can read (use MP4, MOV or WebM).")
+    fps = re.search(r"([\d.]+)\s*fps", err)
+    secs = int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3))
+    return int(v.group(1)), int(v.group(2)), secs, float(fps.group(1)) if fps else 24.0, "Audio:" in err
+
+
+def _speech(src, seconds):
+    """When the clip's sound is speech-loud, as [[start, end], ...] seconds (gaps under a third of a second are joined)."""
+    import subprocess, numpy as np
+    raw = subprocess.run([_ffmpeg(), "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], capture_output=True).stdout
+    a = np.frombuffer(raw, np.int16).astype(np.float32) / 32768
+    if not len(a): return []
+    hop = 800; rms = np.array([np.sqrt(np.mean(a[i:i + hop] ** 2)) for i in range(0, len(a) - hop, hop)])
+    if not len(rms) or rms.max() < 0.01: return []
+    on = rms > max(0.02, 0.25 * np.percentile(rms, 95))
+    out, start = [], None
+    for k, x in enumerate(list(on) + [False]):
+        t = k * hop / 16000
+        if x and start is None: start = t
+        if not x and start is not None: out.append([round(start, 2), round(t, 2)]); start = None
+    joined = []
+    for a0, b0 in out:
+        if joined and a0 - joined[-1][1] < 0.35: joined[-1][1] = b0
+        else: joined.append([a0, b0])
+    return [x for x in joined if x[1] - x[0] >= 0.3]
+
+
+def add_video(raw, filename="clip", name=None, kind=None, description=""):
+    import subprocess, tempfile
+    if len(raw) > MAX_VIDEO_UPLOAD: raise MediaError("That video is too large (200 MB at most).")
+    stem = re.sub(r"[_\-]+", " ", pathlib.Path(filename).stem).strip() or "Clip"
+    with tempfile.TemporaryDirectory() as td:
+        src = pathlib.Path(td) / ("in" + (pathlib.Path(filename).suffix.lower() or ".mp4")); src.write_bytes(raw)
+        w, h, secs, fps, sound = _probe(src)
+        if secs > MAX_VIDEO_SECONDS: raise MediaError(f"Keep clips to {MAX_VIDEO_SECONDS} seconds or shorter (this one is {secs:.0f} s). Trim it first.")
+        speech = _speech(src, secs) if sound else []
+        out = pathlib.Path(td) / "out.webm"
+        subprocess.run([_ffmpeg(), "-y", "-v", "error", "-i", str(src), "-an", "-vf",
+                        f"scale='if(gt(iw,ih),min({VIDEO_MAX_SIDE},iw),-2)':'if(gt(iw,ih),-2,min({VIDEO_MAX_SIDE},ih))':flags=lanczos,fps={min(30, round(fps))}",
+                        "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "32", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4",
+                        "-g", str(max(6, min(30, round(fps)) // 2)), "-pix_fmt", "yuv420p", str(out)], check=True)
+        w2, h2, secs2, fps2, _ = _probe(out)
+        return _store(out.read_bytes(), "webm", w2, h2, False, name or stem, kind if kind in KINDS else "other", description, None,
+                      f"uploaded video ({filename})", None, {"seconds": round(secs2, 2), "fps": round(fps2), "speech": speech, "poster": min(1.0, secs2 / 3)})
+
+
+def video_frames(item, start=0.0, end=None, fps=None, max_side=None):
+    """Frames of a clip from `start` to `end` seconds at `fps` (RGBA when the clip has transparency)."""
+    import subprocess, numpy as np
+    end = item.get("seconds", 0) if end is None else end; fps = fps or item.get("fps", 24)
+    w, h = item["w"], item["h"]
+    if max_side and max(w, h) > max_side: s = max_side / max(w, h); w, h = max(2, round(w * s / 2) * 2), max(2, round(h * s / 2) * 2)
+    alpha = item.get("transparent")
+    dec = ["-c:v", "libvpx-vp9"] if alpha else []                      # ffmpeg's own VP9 decoder drops transparency; libvpx keeps it
+    raw = subprocess.run([_ffmpeg(), "-v", "error", *dec, "-ss", f"{start:.3f}", "-i", str(path(item)), "-t", f"{max(0.05, end - start):.3f}",
+                          "-vf", f"fps={fps},scale={w}:{h}:flags=lanczos", "-f", "rawvideo", "-pix_fmt", "rgba" if alpha else "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    n = 4 if alpha else 3; size = w * h * n
+    return [Image.fromarray(np.frombuffer(raw[i:i + size], np.uint8).reshape(h, w, n), "RGBA" if alpha else "RGB") for i in range(0, len(raw) - size + 1, size)]
+
+
+def video_frame(item, t=0.0):
+    fr = video_frames(item, t, t + 0.2, fps=10)
+    if not fr: fr = video_frames(item, 0, 0.2, fps=10)
+    if not fr: raise MediaError("Couldn't read a picture from that clip.")
+    return fr[0]
+
+
+def _encode_webm(frames, fps, alpha):
+    """Frames -> a WebM clip (VP9, with transparency when `alpha`)."""
+    import subprocess, tempfile
+    w, h = frames[0].size; w2, h2 = w - w % 2, h - h % 2
+    with tempfile.TemporaryDirectory() as td:
+        out = pathlib.Path(td) / "out.webm"
+        p = subprocess.Popen([_ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w2}x{h2}", "-r", str(fps), "-i", "-",
+                              "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "30", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4",
+                              "-g", str(max(6, fps // 2)), "-pix_fmt", "yuva420p" if alpha else "yuv420p", "-auto-alt-ref", "0", str(out)], stdin=subprocess.PIPE)
+        for f in frames: p.stdin.write(f.convert("RGBA").crop((0, 0, w2, h2)).tobytes())
+        p.stdin.close(); p.wait()
+        if p.returncode: raise MediaError("Couldn't encode the clip.")
+        return out.read_bytes(), w2, h2
+
+
+def _cut_frames(frames, box=None, status=None, label="Removing the background"):
+    """Remove the background from every frame (the subject found in each), then crop all of them to the same box."""
+    out = []
+    for k, f in enumerate(frames):
+        if status and k % 6 == 0: status(f"{label}: frame {k + 1} of {len(frames)}…")
+        out.append(remove_background(f, box))
+    boxes = [f.getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox() for f in out]
+    boxes = [b for b in boxes if b]
+    if not boxes: raise MediaError("Couldn't find the subject in the clip.")
+    m = 6; W, H = out[0].size
+    b = (max(0, min(x[0] for x in boxes) - m), max(0, min(x[1] for x in boxes) - m), min(W, max(x[2] for x in boxes) + m), min(H, max(x[3] for x in boxes) + m))
+    cut = [f.crop(b) for f in out]
+    return [_fade_cut_edges(f, b, (W, H)) for f in cut]
+
+
+def _fade_cut_edges(f, box, size, share=0.14):
+    """A subject the camera cut off at the bottom (legs out of the frame) fades out towards it instead of ending in a hard line."""
+    import numpy as np
+    a = np.asarray(f).copy(); h, w = a.shape[:2]; alpha = a[..., 3].astype(np.float32)
+    W, H = size
+    for side, touching in (("bottom", box[3] >= H),):          # only the bottom: legs cut off fade away; a head or ears cut off stay as they are
+        n = int((h if side in ("bottom", "top") else w) * share)
+        if not touching or n < 2: continue
+        if side in ("bottom", "top") and alpha[-1 if side == "bottom" else 0].max() < 128: continue
+        if side in ("left", "right") and alpha[:, -1 if side == "right" else 0].max() < 128: continue
+        ramp = np.linspace(1, 0, n) ** 1.5
+        if side == "bottom": alpha[h - n:] *= ramp[:, None]
+        elif side == "top": alpha[:n] *= ramp[::-1][:, None]
+        elif side == "right": alpha[:, w - n:] *= ramp[None, :]
+        else: alpha[:, :n] *= ramp[::-1][None, :]
+    a[..., 3] = alpha.clip(0, 255).astype(np.uint8)
+    return Image.fromarray(a, "RGBA")
+
+
+def video_cutout(src, params, name=None, status=None):
+    """The clip with its background removed (a transparent WebM), at up to 15 frames a second."""
+    fps = min(15, src.get("fps", 24)); start = float(params.get("start", 0)); end = float(params.get("end", src.get("seconds", 0)))
+    fr = video_frames(src, start, end, fps, max_side=int(params.get("max", 720)))
+    if len(fr) > 15 * 30: raise MediaError("Cut out 30 seconds of a clip at most at a time (choose a start and end).")
+    fr = _cut_frames(fr, params.get("box"), status)
+    data, w, h = _encode_webm(fr, fps, True)
+    return _store(data, "webm", w, h, True, name or f"{src['name']} (cut out)", params.get("kind") or src["kind"], src.get("description", ""),
+                  src["id"], f"remove_background of {src['name']}", None, {"seconds": round(len(fr) / fps, 2), "fps": fps, "poster": 0.0,
+                  "speech": [[max(0, a - start), b - start] for a, b in src.get("speech", []) if b > start and a < end]})
+
+
+def _longest(spans, lo, hi):
+    spans = [(max(lo, a), min(hi, b)) for a, b in spans if min(hi, b) - max(lo, a) > 0]
+    return max(spans, key=lambda x: x[1] - x[0]) if spans else None
+
+
+def video_character(src, params, name=None, status=None):
+    """A talking character made from a clip of it speaking: the idle loop from where it is quiet, the talking loop from where it
+    speaks (both found from the clip's sound unless given as `idle`/`talk` [start, end]). Each loop plays forward then back, so it
+    joins up smoothly, and a slide crossfades between them as the speaker starts and stops."""
+    secs = src.get("seconds", 0); speech = src.get("speech") or []
+    talk = params.get("talk") or (_longest(speech, 0, secs) if speech else None)
+    if not talk: raise MediaError("Couldn't tell when the character speaks in this clip (it has no speech). Say which seconds it talks, e.g. talk 4 to 8.")
+    quiet, t0 = [], 0.0
+    for a, b in sorted(speech) + [[secs, secs]]:
+        if a - t0 > 0: quiet.append((t0, a))
+        t0 = max(t0, b)
+    # the quiet stretch nearest the speech: the character holds much the same pose there, so the switch between loops is gentle
+    gap = lambda q: max(talk[0] - q[1], q[0] - talk[1], 0)
+    idle = params.get("idle") or min((q for q in quiet if q[1] - q[0] >= 1.0), key=gap, default=_longest(quiet, 0, secs))
+    if not idle or idle[1] - idle[0] < 0.6: idle = (max(0, talk[0] - 1.6), talk[0])
+    fps, per = int(params.get("fps", 12)), int(params.get("frames", 10))             # frames each way of a loop (few, so each can be sharp)
+    side = int(params.get("max", 1280))
+    def loop(a, b):
+        n = min(per, max(4, int((b - a) * fps)))
+        mid = (a + b) / 2; a2 = max(a, mid - n / fps / 2)
+        fr = video_frames(src, a2, a2 + n / fps, fps, max_side=side)[:n]
+        return fr + fr[-2:0:-1]                                                    # forward, then back (without repeating the ends)
+    if status: status("Reading the clip…")
+    idle_f, talk_f = loop(*idle), loop(*talk)
+    k = min(len(idle_f), len(talk_f)); idle_f, talk_f = idle_f[:k], talk_f[:k]
+    if not src.get("transparent"):
+        both = _cut_frames(idle_f + talk_f, params.get("box"), status, "Cutting the character out")
+        idle_f, talk_f = both[:k], both[k:]
+    else:                                                                          # already cut out: crop both rows to one box
+        boxes = [f.getchannel("A").getbbox() for f in idle_f + talk_f]; boxes = [b for b in boxes if b]
+        b = (min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes))
+        idle_f, talk_f = [f.crop(b) for f in idle_f], [f.crop(b) for f in talk_f]
+    data, fw, fh = _sprite_rows([idle_f, talk_f])
+    return _store(data, "webp", fw, fh, True, name or f"{src['name']} (character)", params.get("kind") or "mascot", src.get("description", ""),
+                  src["id"], f"character from {src['name']}", {"frames": k, "fps": fps, "mode": "character", "rows": 2},
+                  {"speaker": params["speaker"]} if params.get("speaker") else None)

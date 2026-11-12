@@ -11,6 +11,8 @@
     Image: Spotter dog (talking)           <- optional: an image from the media library to show on this slide
     Say: Feedback is how teams get better. <- one narration step; elements can appear with it
     Say: Done well, it builds trust.
+    Voice: Spotter = Puck                  <- optional: a second speaker (a mascot or character) and the voice it speaks with
+    Spotter: Hi, I'm Spotter!              <- a sentence that speaker says (anywhere a Say: could go)
 
 Narration is kept exactly as written. Lines starting with // are comments. A line that doesn't start with a
 marker continues the previous Say:, Show: or Note:.
@@ -41,6 +43,9 @@ class Slide:
     timing: str = ""                                        # the author's intended window, e.g. "0:30 to 1:30"
     hold: float | None = None                               # extra seconds the finished slide stays up (None: the Studio's pacing setting)
     images: list = dataclasses.field(default_factory=list)  # names of media-library images this slide should show ("Image:")
+    speakers: list = dataclasses.field(default_factory=list)  # who says each sentence of `say` ("" = the narrator)
+
+    def speaker(self, i): return self.speakers[i] if i < len(self.speakers) else ""
 
 
 @dataclasses.dataclass
@@ -49,6 +54,8 @@ class Module:
     subtitle: str = ""
     intro: list = dataclasses.field(default_factory=list)     # narration for the title slide
     slides: list = dataclasses.field(default_factory=list)
+    voices: dict = dataclasses.field(default_factory=dict)   # speaker name -> voice id, from "Voice:" lines
+    intro_speakers: list = dataclasses.field(default_factory=list)
 
     @property
     def sentences(self): return len(self.intro) + sum(len(s.say) for s in self.slides)
@@ -70,6 +77,40 @@ def parse_hold(value, n):
     seconds = float(m.group(1))
     if seconds > MAX_HOLD: raise ScriptError(f"Line {n}: 'Hold:' can be at most {MAX_HOLD:g} seconds.")
     return seconds
+VOICE_LINE = re.compile(r"^voice\s*:\s*([^=:]{1,30}?)\s*(?:=\s*(.+?))?\s*$", re.I)
+DEFAULT_CHARACTER_VOICE = "am_puck"
+
+
+def voice_id(value, n=0):
+    """'Puck', 'am_puck' or 'puck' -> the voice id. Any narrator or character voice can be named."""
+    from html2mp4.cli import VOICES, CHARACTER_VOICES
+    every = {**VOICES, **CHARACTER_VOICES}
+    v = (value or "").strip().strip('"“”').lower()
+    if not v: return DEFAULT_CHARACTER_VOICE
+    if v in every: return v
+    for vid, (name, _) in every.items():
+        if name.lower() == v: return vid
+    raise ScriptError(f"Line {n}: there's no voice called “{value}”. Choose one of: {', '.join(n for n, _ in every.values())}.")
+
+
+def voices_in(text):
+    """The speakers a script declares with "Voice: Name = voice", as {name: voice id}."""
+    out = {}
+    for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
+        m = VOICE_LINE.match(raw.strip())
+        if m:
+            name = " ".join(m.group(1).split())
+            if name.lower() in ("narrator", "narration", "over"): raise ScriptError(f"Line {n}: the narrator's voice is chosen in Settings; 'Voice:' names a second speaker, like 'Voice: Spotter = Puck'.")
+            out[name] = voice_id(m.group(2), n)
+    return out
+
+
+def speaker_line(line, voices):
+    """'Spotter: Hi there' -> ("Spotter", "Hi there") when Spotter is a declared speaker; None otherwise."""
+    for name in voices:
+        m = re.match(rf"^{re.escape(name)}\s*(?:says)?\s*:\s*(.*)$", line, re.I)
+        if m: return name, m.group(1)
+    return None
 SCENE = re.compile(r"^scene\s+(\d+)\s*[:.\-–—]\s*(.*?)\s*(?:\(([^)]*\d:\d\d[^)]*)\))?\s*$", re.I)
 NARRATION = re.compile(r"^(?:narration|narrator|voice[- ]?over|vo|script|says?)\s*:\s*(.*)$", re.I)
 QUOTES = ('"', '“', '”')
@@ -120,13 +161,21 @@ def parse(text, title=None, subtitle=None):
     """Parse a script. `title`/`subtitle` (e.g. from a CSV column) override the script's own."""
     if any(SCENE.match(l.strip()) for l in text.splitlines()):
         return _parse_scenes(text, title, subtitle)
-    m = Module(title="", subtitle="")
+    m = Module(title="", subtitle="", voices=voices_in(text))
     slide, last = None, None            # last = (kind, target) for continuation lines
     for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
         line = raw.strip()
         if not line or line.startswith("//"):
             last = None if not line else last
             continue
+        if VOICE_LINE.match(line): last = None; continue
+        sp = speaker_line(line, m.voices)
+        if sp:
+            who, value = sp; value = _unquote(value)
+            if not value: raise ScriptError(f"Line {n}: '{who}:' has no text.")
+            if slide: slide.say.append(value); slide.speakers += [""] * (len(slide.say) - 1 - len(slide.speakers)) + [who]
+            else: m.intro.append(value); m.intro_speakers += [""] * (len(m.intro) - 1 - len(m.intro_speakers)) + [who]
+            last = ("say", slide); continue
         if line.startswith("## "):
             slide = Slide(title=line[3:].strip()); m.slides.append(slide); last = None
             if not slide.title: raise ScriptError(f"Line {n}: a slide heading needs a title after '##'.")
@@ -168,6 +217,7 @@ def parse(text, title=None, subtitle=None):
         else:
             target.note = f"{target.note} {line}"
 
+    _even(m)
     if title: m.title = title.strip()
     if subtitle: m.subtitle = subtitle.strip()
     if not m.title: raise ScriptError("The script needs a title: add 'Title: …' as the first line.")
@@ -177,14 +227,21 @@ def parse(text, title=None, subtitle=None):
     return m
 
 
+def _even(m):
+    """Every sentence has a speaker entry ("" = the narrator), and a module with nobody else speaking has none at all."""
+    for s in m.slides: s.speakers = (s.speakers + [""] * len(s.say))[:len(s.say)] if any(s.speakers) else []
+    m.intro_speakers = (m.intro_speakers + [""] * len(m.intro))[:len(m.intro)] if any(m.intro_speakers) else []
+
+
 def _parse_scenes(text, title, subtitle):
-    m = Module(title="", subtitle="")
-    slide, head, in_screen = None, [], False
+    m = Module(title="", subtitle="", voices=voices_in(text))
+    slide, head, in_screen, quoted = None, [], False, None      # quoted: who is speaking inside a quote that opened on an earlier line
     for n, raw in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
         line = raw.strip()
         if not line or line.startswith("//"):
             in_screen = False if not line else in_screen
             continue
+        if VOICE_LINE.match(line): continue
         sc = SCENE.match(line)
         if sc:
             slide = Slide(title=sc.group(2).strip() or f"Scene {sc.group(1)}", timing=(sc.group(3) or "").replace("–", "to").strip())
@@ -205,14 +262,24 @@ def _parse_scenes(text, title, subtitle):
         if in_screen and not slide.say and line.endswith((":",)) is False and len(line) < 200 and not re.search(r"[.!?]\s+[A-Z]", line):
             slide.screen = f"{slide.screen} {line}".strip(); continue      # a wrapped On screen: description
         in_screen = False
+        who = quoted or ""
         nar = NARRATION.match(line)
-        if nar: line = nar.group(1)                                     # "Narration: …" labels what is said; it isn't said itself
+        sp = speaker_line(line, m.voices)
+        if nar: line, who = nar.group(1), ""                            # "Narration: …" labels what is said; it isn't said itself
+        elif sp: who, line = sp
+        opens = line[:1] in QUOTES and sum(line.count(q) for q in QUOTES) == 1
+        closes = line[-1:] in QUOTES and sum(line.count(q) for q in QUOTES) == 1
+        quoted = who if opens else (None if closes else quoted)
         line = _unquote(line)
-        if line: slide.say += split_sentences(line)
+        if line:
+            said = split_sentences(line)
+            slide.speakers += [""] * (len(slide.say) - len(slide.speakers)) + [who] * len(said)
+            slide.say += said
     if head:
         first = head[0]
         m.title = re.sub(r"^(?:one\s+)?micro-?learning\s*[:\-–—]\s*", "", first, flags=re.I).strip()
         if len(head) > 1: m.subtitle = " ".join(head[1:])[:120]
+    _even(m)
     for s in m.slides:
         s.show = _quoted(s.screen) if s.screen and len(_quoted(s.screen)) >= 1 and len(s.screen) < 160 else []
     if title: m.title = title.strip()

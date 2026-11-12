@@ -88,6 +88,12 @@ only pictures you can use: `<img data-asset="ID" alt="what it shows" class="..."
   background; an opaque photo sits in a card or panel with rounded corners.
 - An image marked "talks" is a character whose mouth moves while the narrator speaks: use it as the presenter (beside the text,
   facing the content). It can take data-c like any element; don't add data-fx="pop" to it, a gentle entrance reads better.
+- Some narration steps are said by a second speaker (a character, marked "(NAME speaks)"). An image that "talks while NAME speaks"
+  is that character: on a slide where it speaks, show it large enough to be a real presence (about a third of the slide's height or
+  more), on its own side, and have it appear with data-c="0" so it is already there when it starts talking. Give the text or a
+  speech bubble for its line room beside it. Where the narrator speaks and the character only listens, it can be smaller.
+- A "video clip" plays silently from the moment its slide appears: put it in a rounded panel (a cut-out clip can stand on the
+  background), sized with CSS width, and give it data-c="0" so it starts with the slide. Never more than one clip on a slide.
 
 # Technical limits
 No scripts, event handlers, external links or fonts, `url()`, `@import`, your own animations or `@keyframes` (use the motion kit),
@@ -248,7 +254,7 @@ def _scenes_text(module, ids):
         if s.note: lines.append(f"Design note: {s.note}")
         if s.images: lines.append("Show these images from the media library: " + ", ".join(s.images))
         lines.append("Narration steps:")
-        lines += [f"  {i}: {t}" for i, t in enumerate(s.say)]
+        lines += [f"  {i}: {t}" + (f"   ({s.speaker(i)} speaks)" if s.speaker(i) else "") for i, t in enumerate(s.say)]
         out.append("\n".join(lines))
     return "\n\n".join(out)
 

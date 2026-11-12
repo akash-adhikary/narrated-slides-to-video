@@ -300,7 +300,11 @@ PLAYER_JS = r"""/*h2m:player-js*/
   var noticeEl = $('notice'), noticeTimer = null;
   function notice(text, ms){ clearTimeout(noticeTimer); noticeEl.textContent = text || ''; noticeEl.hidden = !text; if (text && ms) noticeTimer = setTimeout(function(){ notice(''); }, ms); }
   function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
-  function talking(on){ stage.classList.toggle('speaking', !!on); }     // a talking character (an animated image) moves only while the voice does
+  function whoNow(){ var f = flat[pos]; return f && (scenes[f[0]].who || {})[f[1]] || ''; }   // who says this sentence ('' = the narrator)
+  function talking(on){                            // a talking character (an animated image) moves only while the voice does: a named
+    stage.classList.toggle('speaking', !!on);      // speaker's character only while that speaker talks
+    var w = on ? whoNow() : ''; if (w) stage.setAttribute('data-speaker', w); else stage.removeAttribute('data-speaker');
+  }
   function stopAudio(){ talking(false); try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) {} if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } }
   function dropPreload(){ if (nextAudio) { nextAudio.onerror = null; nextAudio = null; } }
 
@@ -314,7 +318,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
   function showStep(live){
     var si = flat[pos][0], ci = flat[pos][1], text = flat[pos][2], many = listed(si, ci); cued = [];
     scenes.forEach(function(s, i){
-      var el = document.getElementById(s.id); el.classList.toggle('active', i === si);
+      var el = document.getElementById(s.id), was = el.classList.contains('active'); el.classList.toggle('active', i === si);
+      if (i === si && !was) clipsStart(el); if (i !== si && was) clipsStop(el);
       el.querySelectorAll('[data-c]').forEach(function(e){
         var c = +e.dataset.c, d = parseFloat(e.getAttribute('data-d') || 0), now = i < si || (i === si && c <= ci);
         var isCued = i === si && c === ci && e.hasAttribute('data-cue') && many;
@@ -326,6 +331,11 @@ PLAYER_JS = r"""/*h2m:player-js*/
     });
     ui();
   }
+  // video clips on a slide play from its start, silently, and only while the module plays (the renderer seeks them frame by frame)
+  function clipsOf(el){ return [].slice.call((el || stage).querySelectorAll('video[data-h2m-video]')); }
+  function clipsStart(el){ clipsOf(el).forEach(function(v){ v.muted = true; try { v.currentTime = 0; } catch (e) {} if (playing) { var p = v.play(); if (p && p.catch) p.catch(function(){}); } }); }
+  function clipsStop(el){ clipsOf(el).forEach(function(v){ v.pause(); }); }
+  function clipsRun(on){ clipsOf(document.querySelector('#stage .slide.active')).forEach(function(v){ if (on) { var p = v.play(); if (p && p.catch) p.catch(function(){}); } else v.pause(); }); }
   function reveal(e){ e.classList.add('on'); var i = cued.indexOf(e); if (i >= 0) cued.splice(i, 1); }
   function revealAll(){ cued.slice().forEach(reveal); }
   function ui(){
@@ -351,6 +361,7 @@ PLAYER_JS = r"""/*h2m:player-js*/
   function speakBrowser(my){
     var text = flat[pos][2], u = new SpeechSynthesisUtterance(text);
     if (voice) { u.voice = voice; u.lang = voice.lang; } u.rate = rate;
+    if (whoNow()) u.pitch = 1.4;                   // a second speaker sounds different even with the browser's one voice
     u.onboundary = function(ev){ if (token !== my) return; var ch = ev.charIndex || 0; cued.slice().forEach(function(e){ if (ch >= e._char) reveal(e); }); };
     u.onstart = function(){ if (token === my) talking(true); };
     u.onend = function(){ if (token !== my) return; talking(false); revealAll(); after(my); };
@@ -413,8 +424,8 @@ PLAYER_JS = r"""/*h2m:player-js*/
     armEstimate(text, my, 1); talking(true);                                   // no voices available: silent, paced by reading speed
     timers.push(setTimeout(function(){ if (token === my) { talking(false); revealAll(); after(my); } }, (text.split(/\s+/).length / 2.5 + 0.8) / rate * 1000));
   }
-  function pause(){ playing = false; token++; clearTimers(); stopAudio(); ui(); }
-  function resume(){ playing = true; if (pos >= flat.length - 1 && !cued.length) pos = 0; playStep(); }
+  function pause(){ playing = false; token++; clearTimers(); stopAudio(); clipsRun(false); ui(); }
+  function resume(){ playing = true; if (pos >= flat.length - 1 && !cued.length) pos = 0; clipsRun(true); playStep(); }
   function go(i){ pos = Math.max(0, Math.min(flat.length - 1, i)); if (playing) playStep(); else { token++; clearTimers(); stopAudio(); showStep(false); } }
 
   play.onclick = function(){ if (playing) pause(); else resume(); };
@@ -601,6 +612,23 @@ def read_project(page):
     return data
 
 
+def scenes_js(module):
+    """The narration as the page's script: `var voices` (the speakers other than the narrator and their voices, when there are any) and
+    `var scenes`, one entry per slide with its sentences verbatim, its own hold, and who says which sentence (`who`, by index)."""
+    ids = scene_ids(module)
+    chunks = ([module.intro] if module.intro else []) + [s.say for s in module.slides]
+    holds = ([None] if module.intro else []) + [s.hold for s in module.slides]
+    whos = ([module.intro_speakers] if module.intro else []) + [s.speakers for s in module.slides]
+    voices = {k: v for k, v in (module.voices or {}).items() if any(k in w for w in whos)}
+    def one(sid, c, h, w):
+        who = {str(i): x for i, x in enumerate(w) if x}
+        return (f"  {{id:'{sid}', {f'hold:{h:g}, ' if h is not None else ''}{f'who:{json.dumps(who, ensure_ascii=False)}, ' if who else ''}"
+                f"chunks:{json.dumps(c, ensure_ascii=False)}}}")
+    body = ",\n".join(one(*x) for x in zip(ids, chunks, holds, whos))
+    head = f"var voices = {json.dumps(voices, ensure_ascii=False)};\n" if voices else ""
+    return (head + f"var scenes = [\n{body}\n];").replace("</", "<\\/")      # "</" escaped so it can't end the script block
+
+
 def assemble(module, brand, slides, css="", motion="lively", project=None):
     """Build the module document. `slides` is a list of (layout_class, inner_html), one per content slide.
     `project` (script text, slide designs...) is embedded so the file can be opened again as an editable project."""
@@ -614,11 +642,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
         inner = media.resolve(inner)[0]                       # library images go into the page itself, so it travels with them
         sections.append(f'<section class="slide {esc(layout)}" id="s{i + 1}"><div class="slide-body">{inner}</div>'
                         f'{_footer(brand, i, total)}</section>')
-    chunks = ([module.intro] if module.intro else []) + [s.say for s in module.slides]
-    # narration verbatim; JSON-encoded, with "</" escaped so it can't end the script block
-    holds = ([None] if module.intro else []) + [s.hold for s in module.slides]
-    scene_js = ",\n".join(f"  {{id:'{sid}', {f'hold:{h:g}, ' if h is not None else ''}chunks:{json.dumps(c, ensure_ascii=False)}}}" for sid, c, h in zip(ids, chunks, holds))
-    scene_js = scene_js.replace("</", "<\\/")
+    scene_js = scenes_js(module)
     source = json.dumps(module.to_dict(), ensure_ascii=False).replace("</", "<\\/")
     faces, covered = font_faces(brand)
     page = f"""<!DOCTYPE html>
@@ -633,6 +657,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
 {faces}
 {theme_css(brand)}
 {css}
+{media.speaker_css(module.voices)}
 </style>
 </head>
 <body>
@@ -643,9 +668,7 @@ def assemble(module, brand, slides, css="", motion="lively", project=None):
 <script type="application/json" id="html2mp4-source">{source}</script>
 <script type="application/json" id="html2mp4-project"></script>
 <script>
-var scenes = [
 {scene_js}
-];
 {PLAYER_JS}
 </script>
 </body>

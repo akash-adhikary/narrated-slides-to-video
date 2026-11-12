@@ -206,7 +206,7 @@ def test_bringing_a_character_to_life_moves_its_parts_and_talks_on_a_second_row(
     assert np.abs(a0 - np.asarray(talk[0]).astype(int)).sum() < np.abs(a0 - np.asarray(talk[2]).astype(int)).sum()   # the mouth opens on the talking row
     html, _ = media.resolve(f'<img data-asset="{it["id"]}" alt="Critter">')
     assert 'class="h2m-sprite h2m-char"' in html and "background-size:3200% 200%" in html
-    assert "#stage.speaking .slide.active .h2m-sprite.h2m-char{background-position-y:100%}" in media.SPRITE_CSS
+    assert ".h2m-sprite.h2m-char:not([data-speaker])::after{opacity:1}" in media.SPRITE_CSS        # the talking row fades in over the idle one
     gif, _ = media.export(it, "gif", 1); assert Image.open(io.BytesIO(gif)).n_frames == 32
     with pytest.raises(media.MediaError, match="already animated"): media.edit(it["id"], "animate", {"parts": [TAIL]})
     with pytest.raises(media.MediaError, match="Remove the background first"): media.edit(media.add(png(alpha=False), "Photo.png")["id"], "animate", {"parts": [TAIL]})
